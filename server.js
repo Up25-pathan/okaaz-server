@@ -26,9 +26,20 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/room', roomRoutes);
 
-// Database Connection (Optional for now, will connect if URI provided)
-if (process.env.MONGODB_URI) {
-  mongoose.connect(process.env.MONGODB_URI)
+// Database Connection
+let mongodbUri = process.env.MONGODB_URI;
+if (mongodbUri) {
+  // Clean common copy-paste errors (like including 'const uri = ' or quotes)
+  mongodbUri = mongodbUri.trim();
+  if (mongodbUri.startsWith('const uri = ')) {
+    mongodbUri = mongodbUri.replace('const uri = ', '').trim();
+  }
+  if ((mongodbUri.startsWith('"') && mongodbUri.endsWith('"')) || 
+      (mongodbUri.startsWith("'") && mongodbUri.endsWith("'"))) {
+    mongodbUri = mongodbUri.substring(1, mongodbUri.length - 1);
+  }
+
+  mongoose.connect(mongodbUri)
     .then(() => console.log('Connected to MongoDB'))
     .catch((err) => console.error('MongoDB connection error:', err));
 }
