@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { AccessToken } from 'livekit-server-sdk';
 import mongoose from 'mongoose';
 import roomRoutes from './routes/room.js';
+import authRoutes from './routes/auth.js';
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/room', roomRoutes);
+app.use('/api/auth', authRoutes);
 
 // Database Connection
 let mongodbUri = process.env.MONGODB_URI;
