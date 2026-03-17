@@ -6,11 +6,12 @@ dotenv.config();
 
 const router = express.Router();
 
-const createToken = async (roomName, participantName) => {
+const createToken = async (roomName, participantName, metadata = '') => {
     // If this room doesn't exist, it will be automatically created when the first
     // client joins.
     const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
         identity: participantName,
+        metadata: metadata,
     });
 
     at.addGrant({ roomJoin: true, room: roomName, canPublish: true, canSubscribe: true, canPublishData: true });
@@ -77,7 +78,8 @@ router.post('/join', async (req, res) => {
             return res.status(400).json({ error: 'This meeting has already ended.' });
         }
 
-        const token = await createToken(roomId, userName);
+        const { avatarUrl } = req.body;
+        const token = await createToken(roomId, userName, avatarUrl || '');
         const livekitUrl = process.env.LIVEKIT_URL || 'ws://localhost:7880';
         console.log(`Generated token for ${userName} in room ${roomId}`);
         res.json({ token, url: livekitUrl });
