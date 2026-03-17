@@ -1,14 +1,24 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { AccessToken } from 'livekit-server-sdk';
 import mongoose from 'mongoose';
+import { Server } from 'socket.io';
+import { createServer } from 'http';
 import roomRoutes from './routes/room.js';
 import authRoutes from './routes/auth.js';
+import Message from './models/Message.js';
+import User from './models/User.js';
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -28,10 +38,44 @@ app.use((req, res, next) => {
 app.use('/api/room', roomRoutes);
 app.use('/api/auth', authRoutes);
 
+// Socket.io Logic
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  socket.on('join_community', () => {
+    socket.join('community_hub');
+    console.log(`Socket ${socket.id} joined community_hub`);
+  });
+
+  socket.on('send_message', async (data) => {
+    try {
+      const { senderId, text, type, mediaUrl } = data;
+      
+      const newMessage = new Message({
+        sender: senderId,
+        text,
+        type: type || 'text',
+        mediaUrl: mediaUrl || '',
+      });
+      await newMessage.save();
+
+      // Populate sender info (username, avatarUrl)
+      const populatedMessage = await Message.findById(newMessage._id).populate('sender', 'username avatarUrl');
+
+      io.to('community_hub').emit('receive_message', populatedMessage);
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
+});
+
 // Database Connection
 let mongodbUri = process.env.MONGODB_URI;
 if (mongodbUri) {
-  // Clean common copy-paste errors (like including 'const uri = ' or quotes)
   mongodbUri = mongodbUri.trim();
   if (mongodbUri.startsWith('const uri = ')) {
     mongodbUri = mongodbUri.replace('const uri = ', '').trim();
@@ -48,9 +92,22 @@ if (mongodbUri) {
 
 // Basic health check endpoint
 app.get('/', (req, res) => {
-  res.json({ message: 'MEET API is running' });
+  res.json({ message: 'OKAAZ API with Community Hub is running' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Chat History Endpoint
+app.get('/api/chat/history', async (req, res) => {
+    try {
+        const messages = await Message.find()
+            .sort({ createdAt: -1 })
+            .limit(50)
+            .populate('sender', 'username avatarUrl');
+        res.json(messages.reverse());
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch chat history' });
+    }
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
