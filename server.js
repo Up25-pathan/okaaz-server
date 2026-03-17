@@ -8,11 +8,35 @@ import roomRoutes from './routes/room.js';
 import authRoutes from './routes/auth.js';
 import Message from './models/Message.js';
 import User from './models/User.js';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+// Multer Storage Configuration
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage: storage });
+
 const io = new Server(httpServer, {
   cors: {
     origin: '*',
@@ -24,6 +48,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Request logger
 app.use((req, res, next) => {
@@ -106,6 +131,14 @@ app.get('/api/chat/history', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch chat history' });
     }
+});
+
+app.post('/api/chat/upload', upload.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+  res.json({ imageUrl });
 });
 
 httpServer.listen(PORT, () => {
