@@ -11,7 +11,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key_change_this'
 // Register
 router.post('/register', async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { username, email, password, inviteCode } = req.body;
+
+        // Simple Invite Code Check
+        const GROUP_INVITE_CODE = process.env.INVITE_CODE || 'OKAAZ-2024'; // Default if not in .env
+        if (inviteCode !== GROUP_INVITE_CODE) {
+            return res.status(403).json({ error: 'Invalid invite code. Access restricted.' });
+        }
 
         // Check if user exists
         const existingUser = await User.findOne({ $or: [{ email }, { username }] });
