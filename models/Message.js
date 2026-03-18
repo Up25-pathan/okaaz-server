@@ -15,6 +15,11 @@ const messageSchema = new mongoose.Schema({
         enum: ['text', 'image'],
         default: 'text',
     },
+    channel: {
+        type: String,
+        enum: ['general', 'announcement'],
+        default: 'general',
+    },
     mediaUrl: {
         type: String,
         default: '',

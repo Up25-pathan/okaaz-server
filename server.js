@@ -29,7 +29,7 @@ if (!fs.existsSync(uploadDir)) {
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
@@ -67,27 +67,27 @@ app.use('/api/auth', authRoutes);
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('join_community', () => {
-    socket.join('community_hub');
-    console.log(`Socket ${socket.id} joined community_hub`);
+  socket.on('join_channel', (channel) => {
+    socket.join(channel);
+    console.log(`Socket ${socket.id} joined channel: ${channel}`);
   });
 
   socket.on('send_message', async (data) => {
     try {
-      const { senderId, text, type, mediaUrl } = data;
+      const { senderId, text, type, mediaUrl, channel } = data;
+      const targetChannel = channel || 'general';
       
       const newMessage = new Message({
         sender: senderId,
         text,
         type: type || 'text',
         mediaUrl: mediaUrl || '',
+        channel: targetChannel,
       });
       await newMessage.save();
 
-      // Populate sender info (username, avatarUrl)
       const populatedMessage = await Message.findById(newMessage._id).populate('sender', 'username avatarUrl');
-
-      io.to('community_hub').emit('receive_message', populatedMessage);
+      io.to(targetChannel).emit('receive_message', populatedMessage);
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -123,7 +123,10 @@ app.get('/', (req, res) => {
 // Chat History Endpoint
 app.get('/api/chat/history', async (req, res) => {
     try {
-        const messages = await Message.find()
+        const { channel } = req.query;
+        const query = channel ? { channel } : { channel: 'general' };
+        
+        const messages = await Message.find(query)
             .sort({ createdAt: -1 })
             .limit(50)
             .populate('sender', 'username avatarUrl');
