@@ -8,6 +8,7 @@ import roomRoutes from './routes/room.js';
 import authRoutes from './routes/auth.js';
 import Message from './models/Message.js';
 import User from './models/User.js';
+import Group from './models/Group.js';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -111,8 +112,39 @@ if (mongodbUri) {
   }
 
   mongoose.connect(mongodbUri)
-    .then(() => console.log('Connected to MongoDB'))
+    .then(() => {
+      console.log('Connected to MongoDB');
+      initializeGroups();
+    })
     .catch((err) => console.error('MongoDB connection error:', err));
+}
+
+// Group Initialization
+async function initializeGroups() {
+  const defaultGroups = [
+    {
+      groupId: 'announcement',
+      name: 'Official Announcements',
+      description: 'The primary source for all OKAAZ updates, news, and official announcements. Stay tuned here!',
+      profileUrl: 'https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=200&auto=format&fit=crop', // Professional abstract gradient
+      isAnnouncementOnly: true,
+    },
+    {
+      groupId: 'general',
+      name: 'General Discussion',
+      description: 'The heart of our community. Chat freely, introduce yourself, and connect with other members!',
+      profileUrl: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=200&auto=format&fit=crop', // Community/Collaborative image
+      isAnnouncementOnly: false,
+    }
+  ];
+
+  for (const groupData of defaultGroups) {
+    const exists = await Group.findOne({ groupId: groupData.groupId });
+    if (!exists) {
+      await Group.create(groupData);
+      console.log(`Default group initialized: ${groupData.name}`);
+    }
+  }
 }
 
 // Basic health check endpoint
@@ -133,6 +165,17 @@ app.get('/api/chat/history', async (req, res) => {
         res.json(messages.reverse());
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch chat history' });
+    }
+});
+
+// Group Details Endpoint
+app.get('/api/group/:id', async (req, res) => {
+    try {
+        const group = await Group.findOne({ groupId: req.params.id });
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+        res.json(group);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch group info' });
     }
 });
 
