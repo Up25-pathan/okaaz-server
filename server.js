@@ -116,14 +116,43 @@ io.on('connection', (socket) => {
         });
     });
 
+    // Reply and Reaction Handling
+    socket.on('add_reaction', async (data) => {
+        // data: { messageId, userId, emoji, roomId }
+        try {
+            const message = await Message.findById(data.messageId);
+            if (message) {
+                // Check if user already reacted with this emoji
+                const existing = message.reactions.find(r => r.userId.toString() === data.userId && r.emoji === data.emoji);
+                if (existing) {
+                    // Toggle off (remove)
+                    message.reactions = message.reactions.filter(r => r._id !== existing._id);
+                } else {
+                    // Add reaction
+                    message.reactions.push({ userId: data.userId, emoji: data.emoji });
+                }
+                await message.save();
+                io.to(data.roomId).emit('message_reaction_updated', {
+                    messageId: message._id,
+                    reactions: message.reactions
+                });
+            }
+        } catch (e) {
+            console.error('Error adding reaction:', e);
+        }
+    });
+
     socket.on('send_message', async (messageData) => {
         try {
-            // messageData includes { channel, text, type, mediaUrl, sender: { _id, username, avatarUrl } }
+            // messageData includes { channel, text, type, mediaUrl, replyTo, sender }
             const newMessage = new Message(messageData);
             await newMessage.save();
 
-            // Populate sender details for the broadcast
-            await newMessage.populate('sender', 'username email avatarUrl');
+            // Populate sender and replyTo details for the broadcast
+            await newMessage.populate([
+                { path: 'sender', select: 'username email avatarUrl' },
+                { path: 'replyTo', populate: { path: 'sender', select: 'username' } }
+            ]);
 
             // Broadcast only to the specific room/channel
             const room = messageData.channel;
@@ -208,10 +237,19 @@ app.get('/api/chat/history', async (req, res) => {
         const { channel } = req.query;
         if (!channel) return res.status(400).json({ error: 'Channel is required' });
 
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
+
         const messages = await Message.find({ channel })
-            .sort({ createdAt: 1 })
-            .populate('sender', 'username email avatarUrl');
-        res.json(messages);
+            .sort({ createdAt: -1 }) // get newest messages
+            .skip(skip)
+            .limit(limit)
+            .populate('sender', 'username email avatarUrl')
+            .populate({ path: 'replyTo', populate: { path: 'sender', select: 'username' } });
+        
+        // Reverse array to put old messages at the top for UI
+        res.json(messages.reverse());
     } catch (error) {
         console.error('History fetch error:', error);
         res.status(500).json({ error: 'Failed to fetch chat history' });

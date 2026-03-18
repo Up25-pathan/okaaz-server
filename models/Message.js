@@ -20,6 +20,15 @@ const messageSchema = new mongoose.Schema({
         enum: ['general', 'announcement'],
         default: 'general',
     },
+    replyTo: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Message',
+        default: null,
+    },
+    reactions: [{
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        emoji: { type: String }
+    }],
     mediaUrl: {
         type: String,
         default: '',
