@@ -41,8 +41,12 @@ const upload = multer({ storage: storage });
 const io = new Server(httpServer, {
   cors: {
     origin: '*',
-  }
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
+
+const onlineUsers = new Map();
 
 const PORT = process.env.PORT || 3000;
 
@@ -72,10 +76,9 @@ io.on('connection', (socket) => {
     socket.join(channel);
     console.log(`Socket ${socket.id} joined channel: ${channel}`);
   });
-    console.log(`User connected: ${socket.id}`);
 
-    // Track user presence
-    socket.on('user_connected', (userData) => {
+  // Track user presence
+  socket.on('user_connected', (userData) => {
         if (userData && userData._id) {
             onlineUsers.set(socket.id, {
                 userId: userData._id,
