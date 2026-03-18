@@ -29,7 +29,7 @@ router.post('/register', async (req, res) => {
         await user.save();
 
         const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-        res.status(201).json({ token, user: { id: user._id, username, email, avatarUrl: user.avatarUrl } });
+        res.status(201).json({ token, user: { _id: user._id, username, email, avatarUrl: user.avatarUrl } });
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Server error during registration' });
@@ -47,7 +47,7 @@ router.post('/login', async (req, res) => {
         }
 
         const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ token, user: { id: user._id, username: user.username, email, avatarUrl: user.avatarUrl } });
+        res.json({ token, user: { _id: user._id, username: user.username, email, avatarUrl: user.avatarUrl } });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Server error during login' });
@@ -89,6 +89,27 @@ router.put('/profile', async (req, res) => {
         res.json(user);
     } catch (error) {
         res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
+
+// Get all members
+router.get('/members', async (req, res) => {
+    try {
+        const users = await User.find().select('username avatarUrl bio createdAt');
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch members' });
+    }
+});
+
+// Get specific user profile
+router.get('/profile/:id', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('username avatarUrl bio createdAt');
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch profile' });
     }
 });
 
