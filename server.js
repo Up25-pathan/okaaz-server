@@ -72,31 +72,80 @@ io.on('connection', (socket) => {
     socket.join(channel);
     console.log(`Socket ${socket.id} joined channel: ${channel}`);
   });
+    console.log(`User connected: ${socket.id}`);
 
-  socket.on('send_message', async (data) => {
-    try {
-      const { senderId, text, type, mediaUrl, channel } = data;
-      const targetChannel = channel || 'general';
-      
-      const newMessage = new Message({
-        sender: senderId,
-        text,
-        type: type || 'text',
-        mediaUrl: mediaUrl || '',
-        channel: targetChannel,
-      });
-      await newMessage.save();
+    // Track user presence
+    socket.on('user_connected', (userData) => {
+        if (userData && userData._id) {
+            onlineUsers.set(socket.id, {
+                userId: userData._id,
+                username: userData.username,
+                lastSeen: new Date()
+            });
+            // Broadcast to everyone that this user is online
+            io.emit('presence_update', { userId: userData._id, status: 'online' });
+            console.log(`User ${userData.username} is online`);
+        }
+    });
 
-      const populatedMessage = await Message.findById(newMessage._id).populate('sender', 'username avatarUrl');
-      io.to(targetChannel).emit('receive_message', populatedMessage);
-    } catch (error) {
-      console.error('Error sending message:', error);
-    }
-  });
+    // Join a specific chat room (Hub Group or DM)
+    socket.on('join_room', (roomId) => {
+        socket.join(roomId);
+        console.log(`User ${socket.id} joined room: ${roomId}`);
+    });
 
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-  });
+    socket.on('leave_room', (roomId) => {
+        socket.leave(roomId);
+        console.log(`User ${socket.id} left room: ${roomId}`);
+    });
+
+    // Typing Indicators
+    socket.on('typing', (data) => {
+        // data: { roomId: '...', userId: '...', username: '...' }
+        socket.to(data.roomId).emit('user_typing', {
+            userId: data.userId,
+            username: data.username,
+            roomId: data.roomId
+        });
+    });
+
+    socket.on('stop_typing', (data) => {
+        socket.to(data.roomId).emit('user_stopped_typing', {
+            userId: data.userId,
+            roomId: data.roomId
+        });
+    });
+
+    socket.on('send_message', async (messageData) => {
+        try {
+            // messageData includes { channel, text, type, mediaUrl, sender: { _id, username, avatarUrl } }
+            const newMessage = new Message(messageData);
+            await newMessage.save();
+
+            // Populate sender details for the broadcast
+            await newMessage.populate('sender', 'username email avatarUrl');
+
+            // Broadcast only to the specific room/channel
+            const room = messageData.channel;
+            io.to(room).emit('receive_message', newMessage);
+        } catch (error) {
+            console.error('Error saving message:', error);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`User disconnected: ${socket.id}`);
+        const user = onlineUsers.get(socket.id);
+        if (user) {
+            // Broadcast offline status with last seen
+            io.emit('presence_update', { 
+                userId: user.userId, 
+                status: 'offline',
+                lastSeen: new Date()
+            });
+            onlineUsers.delete(socket.id);
+        }
+    });
 });
 
 // Database Connection
@@ -153,18 +202,40 @@ app.get('/', (req, res) => {
 });
 
 // Chat History Endpoint
+// Fetch history for a specific room (Hub Group or DM)
 app.get('/api/chat/history', async (req, res) => {
     try {
         const { channel } = req.query;
-        const query = channel ? { channel } : { channel: 'general' };
-        
-        const messages = await Message.find(query)
-            .sort({ createdAt: -1 })
-            .limit(50)
-            .populate('sender', 'username avatarUrl');
-        res.json(messages.reverse());
+        if (!channel) return res.status(400).json({ error: 'Channel is required' });
+
+        const messages = await Message.find({ channel })
+            .sort({ createdAt: 1 })
+            .populate('sender', 'username email avatarUrl');
+        res.json(messages);
     } catch (error) {
+        console.error('History fetch error:', error);
         res.status(500).json({ error: 'Failed to fetch chat history' });
+    }
+});
+
+// Presence endpoint to check a specific user's status
+app.get('/api/user/:id/presence', async (req, res) => {
+    try {
+        const targetUserId = req.params.id;
+        let isOnline = false;
+        let lastSeen = null;
+
+        // Check if user is currently in the onlineUsers map
+        for (const [socketId, user] of onlineUsers.entries()) {
+            if (user.userId.toString() === targetUserId) {
+                isOnline = true;
+                break;
+            }
+        }
+
+        res.json({ isOnline, lastSeen: new Date() }); // In a real app, lastSeen would be pulled from User model if offline
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch presence' });
     }
 });
 
