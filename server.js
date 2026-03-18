@@ -179,6 +179,22 @@ app.get('/api/group/:id', async (req, res) => {
     }
 });
 
+// Update Group Endpoint
+app.patch('/api/group/:id', async (req, res) => {
+    try {
+        const { name, description, profileUrl } = req.body;
+        const group = await Group.findOneAndUpdate(
+            { groupId: req.params.id },
+            { $set: { name, description, profileUrl } },
+            { new: true }
+        );
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+        res.json(group);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to update group info' });
+    }
+});
+
 app.post('/api/chat/upload', upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
