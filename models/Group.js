@@ -7,6 +7,8 @@ const GroupSchema = new mongoose.Schema({
   profileUrl: { type: String, default: '' },
   isAnnouncementOnly: { type: Boolean, default: false },
   members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  admins: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   createdAt: { type: Date, default: Date.now },
 });
 

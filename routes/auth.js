@@ -47,7 +47,7 @@ router.post('/register', async (req, res) => {
         await user.save();
 
         const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-        res.status(201).json({ token, user: { _id: user._id, username, email, avatarUrl: user.avatarUrl } });
+        res.status(201).json({ token, user: { _id: user._id, username, email, avatarUrl: user.avatarUrl, role: user.role } });
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Server error during registration' });
@@ -65,7 +65,7 @@ router.post('/login', async (req, res) => {
         }
 
         const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ token, user: { _id: user._id, username: user.username, email, avatarUrl: user.avatarUrl } });
+        res.json({ token, user: { _id: user._id, username: user.username, email, avatarUrl: user.avatarUrl, role: user.role } });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Server error during login' });

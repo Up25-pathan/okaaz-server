@@ -13,6 +13,8 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,19 +25,28 @@ const app = express();
 const httpServer = createServer(app);
 
 // Multer Storage Configuration
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
+let storage;
+if (process.env.CLOUDINARY_URL) {
+  storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+      folder: 'okaaz_chat',
+      allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'mp4', 'mov', 'webm'],
+      resource_type: 'auto',
+    },
+  });
+  console.log("✓ Cloudinary storage configured successfully.");
+} else {
+  const uploadDir = path.join(__dirname, 'uploads');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
   }
-});
+  storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
+  });
+  console.log("⚠ WARNING: Local disk storage enabled. Images will wipe on Render restart. Add CLOUDINARY_URL.");
+}
 const upload = multer({ storage: storage });
 
 const io = new Server(httpServer, {
@@ -330,6 +341,42 @@ app.get('/api/user/:id/presence', async (req, res) => {
     }
 });
 
+// Fetch groups where the current user is a member
+app.get('/api/group/mine', protect, async (req, res) => {
+    try {
+        const groups = await Group.find({ members: req.user._id });
+        res.json(groups);
+    } catch (error) {
+        console.error('Fetch mine groups error:', error);
+        res.status(500).json({ error: 'Failed to fetch your groups' });
+    }
+});
+
+// Create a new group
+app.post('/api/group/create', protect, async (req, res) => {
+    try {
+        const { name, description, profileUrl, isAnnouncementOnly } = req.body;
+        if (!name) return res.status(400).json({ error: 'Group name is required' });
+
+        const groupId = `group_${Date.now()}`;
+        const newGroup = await Group.create({
+            groupId,
+            name,
+            description,
+            profileUrl,
+            isAnnouncementOnly: isAnnouncementOnly || false,
+            members: [req.user._id],
+            admins: [req.user._id],
+            createdBy: req.user._id
+        });
+
+        res.status(201).json(newGroup);
+    } catch (error) {
+        console.error('Create group error:', error);
+        res.status(500).json({ error: 'Failed to create group' });
+    }
+});
+
 // Group Details Endpoint
 app.get('/api/group/:id', protect, async (req, res) => {
     try {
@@ -361,7 +408,12 @@ app.post('/api/chat/upload', protect, upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
-  const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+  let imageUrl;
+  if (process.env.CLOUDINARY_URL) {
+      imageUrl = req.file.path; // Cloudinary secure URL
+  } else {
+      imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+  }
   res.json({ imageUrl });
 });
 
