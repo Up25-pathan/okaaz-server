@@ -18,6 +18,7 @@ const messageSchema = new mongoose.Schema({
     channel: {
         type: String,
         default: 'general',
+        index: true,
     },
     replyTo: {
         type: mongoose.Schema.Types.ObjectId,

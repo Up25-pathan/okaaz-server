@@ -284,7 +284,7 @@ app.get('/api/chat/conversations', protect, async (req, res) => {
         const userIdStr = req.user._id.toString();
         const dmRegex = new RegExp(`^dm_.*${userIdStr}.*`);
         
-        const conversations = await Message.aggregate([
+        const populatedConversations = await Message.aggregate([
             { $match: { channel: { $regex: dmRegex } } },
             { $sort: { createdAt: -1 } },
             { 
@@ -293,25 +293,56 @@ app.get('/api/chat/conversations', protect, async (req, res) => {
                     latestMessage: { $first: '$$ROOT' }
                 }
             },
+            {
+                $addFields: {
+                    participants: { $split: ["$_id", "_"] }
+                }
+            },
+            {
+                $addFields: {
+                    peerId: {
+                        $filter: {
+                            input: "$participants",
+                            as: "p",
+                            cond: { 
+                                $and: [
+                                    { $ne: ["$$p", "dm"] },
+                                    { $ne: ["$$p", userIdStr] }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            { $unwind: "$peerId" },
+            {
+                $addFields: {
+                    peerObjectId: { $toObjectId: "$peerId" }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'peerObjectId',
+                    foreignField: '_id',
+                    as: 'peerUser'
+                }
+            },
+            { $unwind: "$peerUser" },
+            {
+                $project: {
+                    channel: "$_id",
+                    latestMessage: 1,
+                    peerUser: {
+                        username: 1,
+                        avatarUrl: 1,
+                        email: 1,
+                        _id: 1
+                    }
+                }
+            },
             { $sort: { 'latestMessage.createdAt': -1 } }
         ]);
-
-        const populatedConversations = [];
-        for (const convo of conversations) {
-            const participants = convo._id.replace('dm_', '').split('_');
-            const peerId = participants.find(id => id !== userIdStr);
-            
-            if (peerId) {
-                const peerUser = await User.findById(peerId).select('username avatarUrl email');
-                if (peerUser) {
-                    populatedConversations.push({
-                        channel: convo._id,
-                        peerUser: peerUser,
-                        latestMessage: convo.latestMessage
-                    });
-                }
-            }
-        }
 
         res.json(populatedConversations);
     } catch (error) {
@@ -394,7 +425,12 @@ app.post('/api/group/create', protect, async (req, res) => {
 // Group Details Endpoint
 app.get('/api/group/:id', protect, async (req, res) => {
     try {
-        const group = await Group.findOne({ groupId: req.params.id }).populate('members', 'username email avatarUrl bio');
+        const id = req.params.id;
+        const query = mongoose.Types.ObjectId.isValid(id) 
+            ? { $or: [{ _id: id }, { groupId: id }] }
+            : { groupId: id };
+
+        const group = await Group.findOne(query).populate('members', 'username email avatarUrl bio');
         if (!group) return res.status(404).json({ error: 'Group not found' });
         res.json(group);
     } catch (error) {
@@ -406,9 +442,14 @@ app.get('/api/group/:id', protect, async (req, res) => {
 // Update Group Endpoint
 app.patch('/api/group/:id', protect, async (req, res) => {
     try {
+        const id = req.params.id;
+        const query = mongoose.Types.ObjectId.isValid(id) 
+            ? { $or: [{ _id: id }, { groupId: id }] }
+            : { groupId: id };
+
         const { name, description, profileUrl } = req.body;
         const group = await Group.findOneAndUpdate(
-            { groupId: req.params.id },
+            query,
             { $set: { name, description, profileUrl } },
             { new: true }
         );
