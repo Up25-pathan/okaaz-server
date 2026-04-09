@@ -344,7 +344,13 @@ app.get('/api/user/:id/presence', async (req, res) => {
 // Fetch groups where the current user is a member
 app.get('/api/group/mine', protect, async (req, res) => {
     try {
-        const groups = await Group.find({ members: req.user._id });
+        // Return groups where user is a member OR the group is marked as public
+        const groups = await Group.find({
+            $or: [
+                { members: req.user._id },
+                { isPublic: true }
+            ]
+        });
         res.json(groups);
     } catch (error) {
         console.error('Fetch mine groups error:', error);
@@ -355,17 +361,25 @@ app.get('/api/group/mine', protect, async (req, res) => {
 // Create a new group
 app.post('/api/group/create', protect, async (req, res) => {
     try {
-        const { name, description, profileUrl, isAnnouncementOnly } = req.body;
+        const { name, description, profileUrl, isAnnouncementOnly, members, isPublic } = req.body;
         if (!name) return res.status(400).json({ error: 'Group name is required' });
 
         const groupId = `group_${Date.now()}`;
+        
+        // Ensure creator is always in members and admins
+        const memberList = Array.isArray(members) ? members : [];
+        if (!memberList.includes(req.user._id.toString())) {
+            memberList.push(req.user._id);
+        }
+
         const newGroup = await Group.create({
             groupId,
             name,
             description,
             profileUrl,
             isAnnouncementOnly: isAnnouncementOnly || false,
-            members: [req.user._id],
+            isPublic: isPublic || false,
+            members: memberList,
             admins: [req.user._id],
             createdBy: req.user._id
         });
@@ -380,10 +394,11 @@ app.post('/api/group/create', protect, async (req, res) => {
 // Group Details Endpoint
 app.get('/api/group/:id', protect, async (req, res) => {
     try {
-        const group = await Group.findOne({ groupId: req.params.id });
+        const group = await Group.findOne({ groupId: req.params.id }).populate('members', 'username email avatarUrl bio');
         if (!group) return res.status(404).json({ error: 'Group not found' });
         res.json(group);
     } catch (error) {
+        console.error('Fetch group info error:', error);
         res.status(500).json({ error: 'Failed to fetch group info' });
     }
 });
@@ -423,6 +438,25 @@ setInterval(() => {
   fetch(url).catch(() => {});
 }, 14 * 60 * 1000); // Ping every 14 minutes
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  
+  // Ensure default groups exist and are public
+  try {
+      const defaults = [
+          { groupId: 'general', name: 'General Discussion', description: 'Open community chat for all members.', isPublic: true },
+          { groupId: 'announcement', name: 'Official Announcements', description: 'Important updates for the OKAAZ community.', isPublic: true, isAnnouncementOnly: true }
+      ];
+
+      for (const d of defaults) {
+          await Group.findOneAndUpdate(
+              { groupId: d.groupId },
+              { $set: d },
+              { upsert: true, new: true }
+          );
+      }
+      console.log("✓ Default community groups synchronized.");
+  } catch (e) {
+      console.error("Error seeding default groups:", e);
+  }
 });

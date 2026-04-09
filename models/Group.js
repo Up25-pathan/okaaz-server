@@ -6,6 +6,7 @@ const GroupSchema = new mongoose.Schema({
   description: { type: String, default: 'Welcome to the OKAAZ group!' },
   profileUrl: { type: String, default: '' },
   isAnnouncementOnly: { type: Boolean, default: false },
+  isPublic: { type: Boolean, default: false },
   members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   admins: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
