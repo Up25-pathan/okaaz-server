@@ -8,6 +8,24 @@ dotenv.config();
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key_change_this';
 
+// Auth Middleware
+export const protect = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'No token provided' });
+
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = await User.findById(decoded.userId).select('-password');
+        
+        if (!user) return res.status(401).json({ error: 'User not authorized' });
+        
+        req.user = user;
+        next();
+    } catch (error) {
+        res.status(401).json({ error: 'Invalid token' });
+    }
+};
+
 // Register
 router.post('/register', async (req, res) => {
     try {
@@ -55,33 +73,17 @@ router.post('/login', async (req, res) => {
 });
 
 // Get current user (protected)
-router.get('/me', async (req, res) => {
-    try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) return res.status(401).json({ error: 'No token provided' });
-
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.userId).select('-password');
-        
-        if (!user) return res.status(404).json({ error: 'User not found' });
-        
-        res.json(user);
-    } catch (error) {
-        res.status(401).json({ error: 'Invalid token' });
-    }
+router.get('/me', protect, async (req, res) => {
+    res.json(req.user);
 });
 
 // Update Profile
-router.put('/profile', async (req, res) => {
+router.put('/profile', protect, async (req, res) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) return res.status(401).json({ error: 'No token provided' });
-
-        const decoded = jwt.verify(token, JWT_SECRET);
         const { username, bio, avatarUrl } = req.body;
 
         const user = await User.findByIdAndUpdate(
-            decoded.userId,
+            req.user._id,
             { username, bio, avatarUrl },
             { new: true }
         ).select('-password');

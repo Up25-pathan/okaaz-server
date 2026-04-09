@@ -17,7 +17,6 @@ const messageSchema = new mongoose.Schema({
     },
     channel: {
         type: String,
-        enum: ['general', 'announcement'],
         default: 'general',
     },
     replyTo: {

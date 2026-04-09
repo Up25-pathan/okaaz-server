@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
 import roomRoutes from './routes/room.js';
-import authRoutes from './routes/auth.js';
+import authRoutes, { protect } from './routes/auth.js';
 import Message from './models/Message.js';
 import User from './models/User.js';
 import Group from './models/Group.js';
@@ -235,7 +235,7 @@ app.get('/', (req, res) => {
 
 // Chat History Endpoint
 // Fetch history for a specific room (Hub Group or DM)
-app.get('/api/chat/history', async (req, res) => {
+app.get('/api/chat/history', protect, async (req, res) => {
     try {
         const { channel } = req.query;
         if (!channel) return res.status(400).json({ error: 'Channel is required' });
@@ -243,6 +243,14 @@ app.get('/api/chat/history', async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 50;
         const skip = (page - 1) * limit;
+
+        // Privacy Check: If it's a DM, ensure the requesting user is a participant
+        if (channel.startsWith('dm_')) {
+            const participants = channel.replace('dm_', '').split('_');
+            if (!participants.includes(req.user._id.toString())) {
+                return res.status(403).json({ error: 'Access denied: You are not a participant in this DM.' });
+            }
+        }
 
         const messages = await Message.find({ channel })
             .sort({ createdAt: -1 }) // get newest messages
@@ -256,6 +264,48 @@ app.get('/api/chat/history', async (req, res) => {
     } catch (error) {
         console.error('History fetch error:', error);
         res.status(500).json({ error: 'Failed to fetch chat history' });
+    }
+});
+
+// Fetch active DM conversations for the current user
+app.get('/api/chat/conversations', protect, async (req, res) => {
+    try {
+        const userIdStr = req.user._id.toString();
+        const dmRegex = new RegExp(`^dm_.*${userIdStr}.*`);
+        
+        const conversations = await Message.aggregate([
+            { $match: { channel: { $regex: dmRegex } } },
+            { $sort: { createdAt: -1 } },
+            { 
+                $group: { 
+                    _id: '$channel',
+                    latestMessage: { $first: '$$ROOT' }
+                }
+            },
+            { $sort: { 'latestMessage.createdAt': -1 } }
+        ]);
+
+        const populatedConversations = [];
+        for (const convo of conversations) {
+            const participants = convo._id.replace('dm_', '').split('_');
+            const peerId = participants.find(id => id !== userIdStr);
+            
+            if (peerId) {
+                const peerUser = await User.findById(peerId).select('username avatarUrl email');
+                if (peerUser) {
+                    populatedConversations.push({
+                        channel: convo._id,
+                        peerUser: peerUser,
+                        latestMessage: convo.latestMessage
+                    });
+                }
+            }
+        }
+
+        res.json(populatedConversations);
+    } catch (error) {
+        console.error('Conversations fetch error:', error);
+        res.status(500).json({ error: 'Failed to fetch conversations' });
     }
 });
 
@@ -281,7 +331,7 @@ app.get('/api/user/:id/presence', async (req, res) => {
 });
 
 // Group Details Endpoint
-app.get('/api/group/:id', async (req, res) => {
+app.get('/api/group/:id', protect, async (req, res) => {
     try {
         const group = await Group.findOne({ groupId: req.params.id });
         if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -292,7 +342,7 @@ app.get('/api/group/:id', async (req, res) => {
 });
 
 // Update Group Endpoint
-app.patch('/api/group/:id', async (req, res) => {
+app.patch('/api/group/:id', protect, async (req, res) => {
     try {
         const { name, description, profileUrl } = req.body;
         const group = await Group.findOneAndUpdate(
@@ -307,7 +357,7 @@ app.patch('/api/group/:id', async (req, res) => {
     }
 });
 
-app.post('/api/chat/upload', upload.single('image'), (req, res) => {
+app.post('/api/chat/upload', protect, upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
