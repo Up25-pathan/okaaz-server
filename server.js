@@ -365,6 +365,12 @@ app.post('/api/chat/upload', protect, upload.single('image'), (req, res) => {
   res.json({ imageUrl });
 });
 
+// Keep-awake ping for Render free tier
+setInterval(() => {
+  const url = process.env.RENDER_EXTERNAL_URL || 'https://okaaz-server.onrender.com';
+  fetch(url).catch(() => {});
+}, 14 * 60 * 1000); // Ping every 14 minutes
+
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
