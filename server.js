@@ -28,6 +28,29 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const httpServer = createServer(app);
 
+// Multer & Cloudinary Initialization
+let storage;
+if (process.env.CLOUDINARY_URL) {
+    storage = new CloudinaryStorage({
+        cloudinary: cloudinary,
+        params: {
+            folder: 'okaaz_chat',
+            allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'mp4', 'mov', 'webm'],
+            resource_type: 'auto',
+        },
+    });
+    console.log("✓ Cloudinary storage configured.");
+} else {
+    const uploadDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+    storage = multer.diskStorage({
+        destination: (req, file, cb) => cb(null, uploadDir),
+        filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
+    });
+    console.log("⚠ WARNING: Local storage enabled.");
+}
+const upload = multer({ storage });
+
 // Socket Initialization
 const io = new Server(httpServer, {
     cors: { origin: '*', methods: ["GET", "POST"] },
