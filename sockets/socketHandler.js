@@ -1,4 +1,7 @@
 import Message from '../models/Message.js';
+import User from '../models/User.js';
+import Group from '../models/Group.js';
+import { sendPushNotification, broadcastPushNotification } from '../utils/notificationService.js';
 
 const onlineUsers = new Map(); // Socket.id -> { userId, username, lastSeen }
 const userSockets = new Map(); // userId -> Set of socket.ids
@@ -59,22 +62,48 @@ export const setupSocket = (io) => {
 
                 io.to(messageData.channel).emit('receive_message', newMessage);
 
-                // Check for delivery if it's a DM
+                // ── Send Push Notifications ──
                 if (messageData.channel.startsWith('dm_')) {
                     const participants = messageData.channel.replace('dm_', '').split('_');
                     const recipientId = participants.find(id => id !== messageData.sender.toString());
                     
-                    if (recipientId && userSockets.has(recipientId)) {
-                        // Recipient is online, mark as delivered
-                        newMessage.status = 'delivered';
-                        newMessage.deliveredTo.push({ user: recipientId, time: new Date() });
-                        await newMessage.save();
+                    if (recipientId) {
+                        const recipient = await User.findById(recipientId).select('fcmToken');
+                        if (recipient?.fcmToken) {
+                            sendPushNotification(recipient.fcmToken, {
+                                title: newMessage.sender.username,
+                                body: newMessage.type === 'text' ? newMessage.text : 'Sent an attachment',
+                                data: { channelId: messageData.channel, type: 'chat' }
+                            });
+                        }
+
+                        // Check for socket delivery
+                        if (userSockets.has(recipientId)) {
+                            newMessage.status = 'delivered';
+                            newMessage.deliveredTo.push({ user: recipientId, time: new Date() });
+                            await newMessage.save();
+                            
+                            io.to(messageData.channel).emit('message_status_update', {
+                                messageId: newMessage._id, status: 'delivered', channel: messageData.channel
+                            });
+                        }
+                    }
+                } else {
+                    // Group Chat Push
+                    const group = await Group.findOne({ groupId: messageData.channel }).select('members');
+                    if (group) {
+                        const otherMembers = await User.find({ 
+                            _id: { $in: group.members, $ne: messageData.sender } 
+                        }).select('fcmToken');
                         
-                        io.to(messageData.channel).emit('message_status_update', {
-                            messageId: newMessage._id,
-                            status: 'delivered',
-                            channel: messageData.channel
-                        });
+                        const tokens = otherMembers.map(m => m.fcmToken).filter(t => t);
+                        if (tokens.length > 0) {
+                            broadcastPushNotification(tokens, {
+                                title: `Group: ${messageData.channel}`, // Placeholder, usually group name
+                                body: `${newMessage.sender.username}: ${newMessage.type === 'text' ? newMessage.text : 'Attachment'}`,
+                                data: { channelId: messageData.channel, type: 'group' }
+                            });
+                        }
                     }
                 }
             } catch (error) {

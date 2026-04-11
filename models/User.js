@@ -37,6 +37,10 @@ const userSchema = new mongoose.Schema({
         enum: ['user', 'admin'],
         default: 'user',
     },
+    fcmToken: {
+        type: String,
+        default: '',
+    },
 });
 
 // Hash password before saving

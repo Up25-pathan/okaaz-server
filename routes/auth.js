@@ -99,6 +99,19 @@ router.put('/profile', protect, async (req, res) => {
     }
 });
 
+// Save FCM Token
+router.post('/fcm-token', protect, async (req, res) => {
+    try {
+        const { fcmToken } = req.body;
+        if (!fcmToken) return res.status(400).json({ error: 'Token is required' });
+
+        await User.findByIdAndUpdate(req.user._id, { fcmToken });
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to save token' });
+    }
+});
+
 // Get all members
 router.get('/members', async (req, res) => {
     try {

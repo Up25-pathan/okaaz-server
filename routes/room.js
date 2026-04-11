@@ -3,6 +3,8 @@ import { AccessToken } from 'livekit-server-sdk';
 import Room from '../models/Room.js';
 import { protect } from './auth.js';
 import dotenv from 'dotenv';
+import User from '../models/User.js';
+import { broadcastPushNotification } from '../utils/notificationService.js';
 dotenv.config();
 
 const router = express.Router();
@@ -43,11 +45,19 @@ router.post('/schedule', protect, async (req, res) => {
         // Broadcast notification to ALL connected members via Socket.IO
         if (ioInstance) {
             ioInstance.emit('meeting_scheduled', {
-                roomId: room.roomId,
-                title: room.title,
-                description: room.description,
-                hostName: req.user.username,
-                scheduledTime: room.scheduledTime,
+                roomId: room.roomId, title: room.title, description: room.description,
+                hostName: req.user.username, scheduledTime: room.scheduledTime,
+            });
+        }
+
+        // ── FCM Broadcast ──
+        const allUsers = await User.find({}).select('fcmToken');
+        const tokens = allUsers.map(u => u.fcmToken).filter(t => t);
+        if (tokens.length > 0) {
+            broadcastPushNotification(tokens, {
+                title: '📅 New Meeting Scheduled',
+                body: `${req.user.username} scheduled "${room.title}"`,
+                data: { roomId: room.roomId, type: 'meeting' }
             });
         }
 
@@ -126,6 +136,17 @@ router.post('/join', async (req, res) => {
                         roomId: room.roomId,
                         title: room.title,
                         hostName: room.hostName,
+                    });
+                }
+
+                // ── FCM Broadcast ──
+                const allUsers = await User.find({}).select('fcmToken');
+                const tokens = allUsers.map(u => u.fcmToken).filter(t => t);
+                if (tokens.length > 0) {
+                    broadcastPushNotification(tokens, {
+                        title: '🟢 Meeting Started',
+                        body: `${room.hostName} started "${room.title}" — Join now!`,
+                        data: { roomId: room.roomId, type: 'meeting' }
                     });
                 }
             } else {
