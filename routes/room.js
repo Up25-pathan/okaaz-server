@@ -1,26 +1,24 @@
 import express from 'express';
 import { AccessToken } from 'livekit-server-sdk';
 import Room from '../models/Room.js';
+import { protect } from './auth.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
 const router = express.Router();
 
 const createToken = async (roomName, participantName, metadata = '') => {
-    // If this room doesn't exist, it will be automatically created when the first
-    // client joins.
     const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
         identity: participantName,
         metadata: metadata,
     });
-
     at.addGrant({ roomJoin: true, room: roomName, canPublish: true, canSubscribe: true, canPublishData: true });
-
     return await at.toJwt();
 };
 
-router.post('/schedule', async (req, res) => {
-    const { roomId, hostId, scheduledTime } = req.body;
+// Schedule a meeting
+router.post('/schedule', protect, async (req, res) => {
+    const { roomId, title, hostId, scheduledTime } = req.body;
 
     if (!roomId || !hostId || !scheduledTime) {
         return res.status(400).json({ error: 'roomId, hostId, and scheduledTime are required' });
@@ -29,6 +27,7 @@ router.post('/schedule', async (req, res) => {
     try {
         const room = new Room({
             roomId,
+            title: title || 'Meeting',
             hostId,
             scheduledTime: new Date(scheduledTime),
             status: 'scheduled'
@@ -41,6 +40,39 @@ router.post('/schedule', async (req, res) => {
     }
 });
 
+// Get scheduled/upcoming meetings for the user
+router.get('/scheduled', protect, async (req, res) => {
+    try {
+        const userId = req.user._id.toString();
+        const meetings = await Room.find({
+            status: { $in: ['scheduled', 'active'] },
+            $or: [
+                { hostId: userId },
+                { participants: userId }
+            ]
+        }).sort({ scheduledTime: 1 });
+
+        // Also find meetings where anyone can join (public)
+        const publicMeetings = await Room.find({
+            status: { $in: ['scheduled', 'active'] },
+        }).sort({ scheduledTime: 1 });
+
+        // Merge and de-duplicate
+        const allMeetings = [...meetings];
+        for (const pm of publicMeetings) {
+            if (!allMeetings.find(m => m.roomId === pm.roomId)) {
+                allMeetings.push(pm);
+            }
+        }
+
+        res.json(allMeetings);
+    } catch (error) {
+        console.error('Error fetching scheduled meetings:', error);
+        res.status(500).json({ error: 'Failed to fetch scheduled meetings' });
+    }
+});
+
+// Join a meeting room (generate LiveKit token)
 router.post('/join', async (req, res) => {
     const { roomId, userName, userId } = req.body;
 
@@ -52,10 +84,10 @@ router.post('/join', async (req, res) => {
         let room = await Room.findOne({ roomId });
 
         if (!room) {
-            // If room doesn't exist, create it as active (legacy/quick start)
             room = new Room({ 
-                roomId, 
-                hostId: userId || userName, // Fallback if userId not provided
+                roomId,
+                title: roomId,
+                hostId: userId || userName,
                 status: 'active' 
             });
             await room.save();
@@ -64,7 +96,6 @@ router.post('/join', async (req, res) => {
         // Logic for scheduled meetings
         if (room.status === 'scheduled') {
             if (userId === room.hostId || userName === room.hostId) {
-                // Host is joining, start the meeting
                 room.status = 'active';
                 await room.save();
             } else {
@@ -78,6 +109,12 @@ router.post('/join', async (req, res) => {
             return res.status(400).json({ error: 'This meeting has already ended.' });
         }
 
+        // Track participant
+        if (userId && !room.participants.includes(userId)) {
+            room.participants.push(userId);
+            await room.save();
+        }
+
         const { avatarUrl } = req.body;
         const token = await createToken(roomId, userName, avatarUrl || '');
         const livekitUrl = process.env.LIVEKIT_URL || 'ws://localhost:7880';
@@ -86,6 +123,22 @@ router.post('/join', async (req, res) => {
     } catch (error) {
         console.error('Error joining room:', error);
         res.status(500).json({ error: 'Failed to join room' });
+    }
+});
+
+// End a meeting
+router.post('/end', protect, async (req, res) => {
+    const { roomId } = req.body;
+    try {
+        const room = await Room.findOneAndUpdate(
+            { roomId },
+            { status: 'ended' },
+            { returnDocument: 'after' }
+        );
+        if (!room) return res.status(404).json({ error: 'Room not found' });
+        res.json({ message: 'Meeting ended', room });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to end meeting' });
     }
 });
 

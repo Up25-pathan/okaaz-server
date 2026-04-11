@@ -87,6 +87,78 @@ app.post('/api/chat/upload', protect, upload.single('image'), (req, res) => {
     res.json({ imageUrl });
 });
 
+// Chat History Endpoint
+import Message from './models/Message.js';
+
+app.get('/api/chat/history', protect, async (req, res) => {
+    try {
+        const { channel } = req.query;
+        if (!channel) return res.status(400).json({ error: 'Channel is required' });
+
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
+
+        if (channel.startsWith('dm_')) {
+            const participants = channel.replace('dm_', '').split('_');
+            if (!participants.includes(req.user._id.toString())) {
+                return res.status(403).json({ error: 'Access denied.' });
+            }
+        }
+
+        const messages = await Message.find({ channel })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('sender', 'username email avatarUrl')
+            .populate({ path: 'replyTo', populate: { path: 'sender', select: 'username' } });
+        
+        res.json(messages.reverse());
+    } catch (error) {
+        console.error('History fetch error:', error);
+        res.status(500).json({ error: 'Failed to fetch chat history' });
+    }
+});
+
+// Fetch active DM conversations for the current user
+app.get('/api/chat/conversations', protect, async (req, res) => {
+    try {
+        const userIdStr = req.user._id.toString();
+        const dmRegex = new RegExp(`^dm_.*${userIdStr}.*`);
+        
+        const populatedConversations = await Message.aggregate([
+            { $match: { channel: { $regex: dmRegex } } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: '$channel', latestMessage: { $first: '$$ROOT' } } },
+            { $addFields: { participants: { $split: ["$_id", "_"] } } },
+            { $addFields: {
+                peerId: {
+                    $filter: {
+                        input: "$participants",
+                        as: "p",
+                        cond: { $and: [{ $ne: ["$$p", "dm"] }, { $ne: ["$$p", userIdStr] }] }
+                    }
+                }
+            }},
+            { $unwind: "$peerId" },
+            { $addFields: { peerObjectId: { $toObjectId: "$peerId" } } },
+            { $lookup: { from: 'users', localField: 'peerObjectId', foreignField: '_id', as: 'peerUser' } },
+            { $unwind: "$peerUser" },
+            { $project: {
+                channel: "$_id",
+                latestMessage: 1,
+                peerUser: { username: 1, avatarUrl: 1, email: 1, _id: 1 }
+            }},
+            { $sort: { 'latestMessage.createdAt': -1 } }
+        ]);
+
+        res.json(populatedConversations);
+    } catch (error) {
+        console.error('Conversations fetch error:', error);
+        res.status(500).json({ error: 'Failed to fetch conversations' });
+    }
+});
+
 // Presence API
 app.get('/api/user/:id/presence', (req, res) => {
     const targetUserId = req.params.id;

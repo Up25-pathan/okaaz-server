@@ -6,6 +6,10 @@ const roomSchema = new mongoose.Schema({
         required: true,
         unique: true,
     },
+    title: {
+        type: String,
+        default: 'Meeting',
+    },
     hostId: {
         type: String,
         required: true,
@@ -18,6 +22,9 @@ const roomSchema = new mongoose.Schema({
         enum: ['scheduled', 'active', 'ended'],
         default: 'active',
     },
+    participants: [{
+        type: String,
+    }],
     createdAt: {
         type: Date,
         default: Date.now,
