@@ -10,9 +10,17 @@ const roomSchema = new mongoose.Schema({
         type: String,
         default: 'Meeting',
     },
+    description: {
+        type: String,
+        default: '',
+    },
     hostId: {
         type: String,
         required: true,
+    },
+    hostName: {
+        type: String,
+        default: '',
     },
     scheduledTime: {
         type: Date,

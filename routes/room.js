@@ -7,6 +7,10 @@ dotenv.config();
 
 const router = express.Router();
 
+// Store io reference - will be set from server.js
+let ioInstance = null;
+export const setIO = (io) => { ioInstance = io; };
+
 const createToken = async (roomName, participantName, metadata = '') => {
     const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
         identity: participantName,
@@ -16,9 +20,9 @@ const createToken = async (roomName, participantName, metadata = '') => {
     return await at.toJwt();
 };
 
-// Schedule a meeting
+// Schedule a meeting (visible to ALL OKAAZ members)
 router.post('/schedule', protect, async (req, res) => {
-    const { roomId, title, hostId, scheduledTime } = req.body;
+    const { roomId, title, description, hostId, scheduledTime } = req.body;
 
     if (!roomId || !hostId || !scheduledTime) {
         return res.status(400).json({ error: 'roomId, hostId, and scheduledTime are required' });
@@ -28,11 +32,25 @@ router.post('/schedule', protect, async (req, res) => {
         const room = new Room({
             roomId,
             title: title || 'Meeting',
+            description: description || '',
             hostId,
+            hostName: req.user.username,
             scheduledTime: new Date(scheduledTime),
             status: 'scheduled'
         });
         await room.save();
+
+        // Broadcast notification to ALL connected members via Socket.IO
+        if (ioInstance) {
+            ioInstance.emit('meeting_scheduled', {
+                roomId: room.roomId,
+                title: room.title,
+                description: room.description,
+                hostName: req.user.username,
+                scheduledTime: room.scheduledTime,
+            });
+        }
+
         res.json({ message: 'Meeting scheduled successfully', room });
     } catch (error) {
         console.error('Error scheduling meeting:', error);
@@ -40,35 +58,38 @@ router.post('/schedule', protect, async (req, res) => {
     }
 });
 
-// Get scheduled/upcoming meetings for the user
+// Get ALL upcoming scheduled meetings (visible to every OKAAZ member)
 router.get('/scheduled', protect, async (req, res) => {
     try {
-        const userId = req.user._id.toString();
         const meetings = await Room.find({
             status: { $in: ['scheduled', 'active'] },
-            $or: [
-                { hostId: userId },
-                { participants: userId }
-            ]
+            // Only show meetings with a scheduledTime (excludes instant meetings)
+            scheduledTime: { $exists: true, $ne: null },
         }).sort({ scheduledTime: 1 });
 
-        // Also find meetings where anyone can join (public)
-        const publicMeetings = await Room.find({
-            status: { $in: ['scheduled', 'active'] },
-        }).sort({ scheduledTime: 1 });
-
-        // Merge and de-duplicate
-        const allMeetings = [...meetings];
-        for (const pm of publicMeetings) {
-            if (!allMeetings.find(m => m.roomId === pm.roomId)) {
-                allMeetings.push(pm);
-            }
-        }
-
-        res.json(allMeetings);
+        res.json(meetings);
     } catch (error) {
         console.error('Error fetching scheduled meetings:', error);
         res.status(500).json({ error: 'Failed to fetch scheduled meetings' });
+    }
+});
+
+// Purge old/dummy data — one-time cleanup endpoint
+router.delete('/cleanup', protect, async (req, res) => {
+    try {
+        // Delete all rooms that are:
+        // 1. status 'active' but have no scheduledTime (instant meetings that are stale)
+        // 2. status 'ended'
+        const result = await Room.deleteMany({
+            $or: [
+                { status: 'ended' },
+                { status: 'active', scheduledTime: { $exists: false } },
+                { status: 'active', scheduledTime: null },
+            ]
+        });
+        res.json({ message: `Cleaned up ${result.deletedCount} stale rooms.` });
+    } catch (error) {
+        res.status(500).json({ error: 'Cleanup failed' });
     }
 });
 
@@ -88,6 +109,7 @@ router.post('/join', async (req, res) => {
                 roomId,
                 title: roomId,
                 hostId: userId || userName,
+                hostName: userName,
                 status: 'active' 
             });
             await room.save();
@@ -98,6 +120,14 @@ router.post('/join', async (req, res) => {
             if (userId === room.hostId || userName === room.hostId) {
                 room.status = 'active';
                 await room.save();
+                // Notify everyone the meeting started
+                if (ioInstance) {
+                    ioInstance.emit('meeting_started', {
+                        roomId: room.roomId,
+                        title: room.title,
+                        hostName: room.hostName,
+                    });
+                }
             } else {
                 return res.status(403).json({ 
                     error: 'Meeting has not started yet. Please wait for the host to join.' 

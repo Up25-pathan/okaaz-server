@@ -14,7 +14,7 @@ import { CloudinaryStorage } from 'multer-storage-cloudinary';
 // Modular Imports
 import connectDB from './config/db.js';
 import { setupSocket, getOnlineUsers } from './sockets/socketHandler.js';
-import roomRoutes from './routes/room.js';
+import roomRoutes, { setIO } from './routes/room.js';
 import authRoutes, { protect } from './routes/auth.js';
 import Group from './models/Group.js';
 
@@ -55,6 +55,7 @@ const io = new Server(httpServer, {
     pingTimeout: 60000,
 });
 setupSocket(io);
+setIO(io);
 
 // Middleware
 app.use(cors());
