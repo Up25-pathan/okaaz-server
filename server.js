@@ -72,6 +72,10 @@ app.get('/', (req, res) => {
     });
 });
 
+app.get('/api/ping', (req, res) => {
+    res.status(200).send('pong');
+});
+
 // Routes
 app.use('/api/room', roomRoutes);
 app.use('/api/auth', authRoutes);
@@ -116,8 +120,10 @@ httpServer.listen(PORT, async () => {
     if (mongoose.connection.readyState === 1) await initializeGroups();
 });
 
-// Keep-awake ping for Render
+// Keep-awake ping for Render (Self-ping every 5 minutes)
 setInterval(() => {
     const url = process.env.RENDER_EXTERNAL_URL || 'https://okaaz-server.onrender.com';
-    fetch(`${url}/`).catch(() => {});
-}, 10 * 60 * 1000); 
+    fetch(`${url}/api/ping`)
+        .then(res => console.log(`[${new Date().toISOString()}] Self-ping success: ${res.status}`))
+        .catch(err => console.error(`[${new Date().toISOString()}] Self-ping failed: ${err.message}`));
+}, 5 * 60 * 1000); 
