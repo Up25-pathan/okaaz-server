@@ -12,7 +12,7 @@ const messageSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['text', 'image'],
+        enum: ['text', 'image', 'voice', 'video', 'document', 'system'],
         default: 'text',
     },
     channel: {
@@ -25,6 +25,10 @@ const messageSchema = new mongoose.Schema({
         ref: 'Message',
         default: null,
     },
+    isForwarded: {
+        type: Boolean,
+        default: false
+    },
     reactions: [{
         userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         emoji: { type: String }
@@ -33,6 +37,27 @@ const messageSchema = new mongoose.Schema({
         type: String,
         default: '',
     },
+    fileName: {
+        type: String,
+        default: '',
+    },
+    fileSize: {
+        type: Number,
+        default: 0,
+    },
+    status: {
+        type: String,
+        enum: ['sent', 'delivered', 'read'],
+        default: 'sent'
+    },
+    deliveredTo: [{
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        time: { type: Date, default: Date.now }
+    }],
+    readBy: [{
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        time: { type: Date, default: Date.now }
+    }],
     createdAt: {
         type: Date,
         default: Date.now,

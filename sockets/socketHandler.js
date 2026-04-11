@@ -1,31 +1,31 @@
 import Message from '../models/Message.js';
 
-const onlineUsers = new Map();
+const onlineUsers = new Map(); // Socket.id -> { userId, username, lastSeen }
+const userSockets = new Map(); // userId -> Set of socket.ids
 
 export const setupSocket = (io) => {
     io.on('connection', (socket) => {
         console.log('User connected:', socket.id);
 
-        socket.on('join_channel', (channel) => {
-            socket.join(channel);
-            console.log(`Socket ${socket.id} joined channel: ${channel}`);
-        });
-
-        // Track user presence
         socket.on('user_connected', (userData) => {
             if (userData && userData._id) {
+                const userId = userData._id.toString();
                 onlineUsers.set(socket.id, {
-                    userId: userData._id,
+                    userId: userId,
                     username: userData.username,
                     lastSeen: new Date()
                 });
-                // Broadcast to everyone that this user is online
-                io.emit('presence_update', { userId: userData._id, status: 'online' });
+
+                if (!userSockets.has(userId)) {
+                    userSockets.set(userId, new Set());
+                }
+                userSockets.get(userId).add(socket.id);
+
+                io.emit('presence_update', { userId: userId, status: 'online' });
                 console.log(`User ${userData.username} is online`);
             }
         });
 
-        // Join a specific chat room (Hub Group or DM)
         socket.on('join_room', (roomId) => {
             socket.join(roomId);
             console.log(`User ${socket.id} joined room: ${roomId}`);
@@ -36,76 +36,112 @@ export const setupSocket = (io) => {
             console.log(`User ${socket.id} left room: ${roomId}`);
         });
 
-        // Typing Indicators
         socket.on('typing', (data) => {
-            socket.to(data.roomId).emit('user_typing', {
-                userId: data.userId,
-                username: data.username,
-                roomId: data.roomId
-            });
+            socket.to(data.roomId).emit('user_typing', data);
         });
 
         socket.on('stop_typing', (data) => {
-            socket.to(data.roomId).emit('user_stopped_typing', {
-                userId: data.userId,
-                roomId: data.roomId
-            });
-        });
-
-        // Reply and Reaction Handling
-        socket.on('add_reaction', async (data) => {
-            try {
-                const message = await Message.findById(data.messageId);
-                if (message) {
-                    const existing = message.reactions.find(r => r.userId.toString() === data.userId && r.emoji === data.emoji);
-                    if (existing) {
-                        message.reactions = message.reactions.filter(r => r._id !== existing._id);
-                    } else {
-                        message.reactions.push({ userId: data.userId, emoji: data.emoji });
-                    }
-                    await message.save();
-                    io.to(data.roomId).emit('message_reaction_updated', {
-                        messageId: message._id,
-                        reactions: message.reactions
-                    });
-                }
-            } catch (e) {
-                console.error('Error adding reaction:', e);
-            }
+            socket.to(data.roomId).emit('user_stopped_typing', data);
         });
 
         socket.on('send_message', async (messageData) => {
             try {
-                const newMessage = new Message(messageData);
+                const newMessage = new Message({
+                    ...messageData,
+                    status: 'sent'
+                });
                 await newMessage.save();
 
                 await newMessage.populate([
-                    { path: 'sender', select: 'username email avatarUrl' },
+                    { path: 'sender', select: 'username email avatarUrl role' },
                     { path: 'replyTo', populate: { path: 'sender', select: 'username' } }
                 ]);
 
-                const room = messageData.channel;
-                io.to(room).emit('receive_message', newMessage);
+                io.to(messageData.channel).emit('receive_message', newMessage);
+
+                // Check for delivery if it's a DM
+                if (messageData.channel.startsWith('dm_')) {
+                    const participants = messageData.channel.replace('dm_', '').split('_');
+                    const recipientId = participants.find(id => id !== messageData.sender.toString());
+                    
+                    if (recipientId && userSockets.has(recipientId)) {
+                        // Recipient is online, mark as delivered
+                        newMessage.status = 'delivered';
+                        newMessage.deliveredTo.push({ user: recipientId, time: new Date() });
+                        await newMessage.save();
+                        
+                        io.to(messageData.channel).emit('message_status_update', {
+                            messageId: newMessage._id,
+                            status: 'delivered',
+                            channel: messageData.channel
+                        });
+                    }
+                }
             } catch (error) {
-                console.error('Error saving message:', error);
+                console.error('Error sending message:', error);
             }
         });
 
-        // Hand Raise Event
+        socket.on('add_reaction', async (data) => {
+            try {
+                const message = await Message.findById(data.messageId);
+                if (message) {
+                    const userIdStr = data.userId.toString();
+                    const existingIndex = message.reactions.findIndex(r => r.userId.toString() === userIdStr && r.emoji === data.emoji);
+                    
+                    if (existingIndex > -1) {
+                        message.reactions.splice(existingIndex, 1);
+                    } else {
+                        message.reactions.push({ userId: data.userId, emoji: data.emoji });
+                    }
+                    
+                    await message.save();
+                    io.to(data.channel).emit('message_reaction_updated', {
+                        messageId: message._id,
+                        reactions: message.reactions,
+                        channel: data.channel
+                    });
+                }
+            } catch (e) {
+                console.error('Reaction error:', e);
+            }
+        });
+
+        socket.on('delete_message', async (data) => {
+            try {
+                const message = await Message.findById(data.messageId);
+                if (message && message.sender.toString() === data.userId) {
+                    await Message.findByIdAndDelete(data.messageId);
+                    io.to(data.channel).emit('message_deleted', {
+                        messageId: data.messageId,
+                        channel: data.channel
+                    });
+                }
+            } catch (e) {
+                console.error('Delete error:', e);
+            }
+        });
+
         socket.on('hand_raise', (data) => {
-            // data: { roomId, userId, username, active: true/false }
             io.to(data.roomId).emit('user_hand_raised', data);
         });
 
         socket.on('disconnect', () => {
-            console.log(`User disconnected: ${socket.id}`);
             const user = onlineUsers.get(socket.id);
             if (user) {
-                io.emit('presence_update', { 
-                    userId: user.userId, 
-                    status: 'offline',
-                    lastSeen: new Date()
-                });
+                const userId = user.userId;
+                const sockets = userSockets.get(userId);
+                if (sockets) {
+                    sockets.delete(socket.id);
+                    if (sockets.size === 0) {
+                        userSockets.delete(userId);
+                        io.emit('presence_update', { 
+                            userId: userId, 
+                            status: 'offline',
+                            lastSeen: new Date()
+                        });
+                    }
+                }
                 onlineUsers.delete(socket.id);
             }
         });
