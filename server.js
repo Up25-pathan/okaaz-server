@@ -16,6 +16,7 @@ import connectDB from './config/db.js';
 import { setupSocket, getOnlineUsers } from './sockets/socketHandler.js';
 import roomRoutes, { setIO } from './routes/room.js';
 import authRoutes, { protect } from './routes/auth.js';
+import adminRoutes from './routes/admin.js';
 import Group from './models/Group.js';
 
 dotenv.config();
@@ -80,6 +81,7 @@ app.get('/api/ping', (req, res) => {
 // Routes
 app.use('/api/room', roomRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 
 // File Upload Route
 app.post('/api/chat/upload', protect, upload.single('image'), (req, res) => {

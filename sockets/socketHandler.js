@@ -91,6 +91,12 @@ export const setupSocket = (io) => {
             }
         });
 
+        // Hand Raise Event
+        socket.on('hand_raise', (data) => {
+            // data: { roomId, userId, username, active: true/false }
+            io.to(data.roomId).emit('user_hand_raised', data);
+        });
+
         socket.on('disconnect', () => {
             console.log(`User disconnected: ${socket.id}`);
             const user = onlineUsers.get(socket.id);

@@ -32,8 +32,13 @@ router.post('/register', async (req, res) => {
         const { username, email, password, inviteCode } = req.body;
 
         // Simple Invite Code Check
-        const GROUP_INVITE_CODE = process.env.INVITE_CODE || 'OKAAZ-2024'; // Default if not in .env
-        if (inviteCode !== GROUP_INVITE_CODE) {
+        const GROUP_INVITE_CODE = process.env.INVITE_CODE || 'OKAAZ-2024'; 
+        const ADMIN_INVITE_CODE = 'OKAAZ-ADMIN';
+
+        let role = 'user';
+        if (inviteCode === ADMIN_INVITE_CODE) {
+            role = 'admin';
+        } else if (inviteCode !== GROUP_INVITE_CODE) {
             return res.status(403).json({ error: 'Invalid invite code. Access restricted.' });
         }
 
@@ -43,7 +48,7 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ error: 'Username or email already exists' });
         }
 
-        const user = new User({ username, email, password });
+        const user = new User({ username, email, password, role });
         await user.save();
 
         const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
