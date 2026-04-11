@@ -31,6 +31,24 @@ router.post('/groups', protect, async (req, res) => {
     }
 });
 
+// Get group details
+router.get('/groups/:id', protect, async (req, res) => {
+    try {
+        const group = await Group.findOne({ groupId: req.params.id })
+            .populate('members', 'username avatarUrl email bio')
+            .populate('admins', 'username avatarUrl')
+            .populate('createdBy', 'username');
+        
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+        if (!group.members.some(m => m._id.toString() === req.user._id.toString())) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        res.json(group);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch group details' });
+    }
+});
+
 // Update group (admins only)
 router.put('/groups/:id', protect, async (req, res) => {
     try {
@@ -41,16 +59,51 @@ router.put('/groups/:id', protect, async (req, res) => {
             return res.status(403).json({ error: 'Only admins can update group settings' });
         }
 
-        const { name, description, members, admins } = req.body;
+        const { name, description, profileUrl, admins, members } = req.body;
         if (name) group.name = name;
         if (description) group.description = description;
-        if (members) group.members = members;
+        if (profileUrl !== undefined) group.profileUrl = profileUrl;
         if (admins) group.admins = admins;
+        if (members) group.members = members;
 
         await group.save();
         res.json(group);
     } catch (error) {
         res.status(500).json({ error: 'Failed to update group' });
+    }
+});
+
+// Leave or Remove member
+router.delete('/groups/:id/members/:userId', protect, async (req, res) => {
+    try {
+        const group = await Group.findOne({ groupId: req.params.id });
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const targetUserId = req.params.userId;
+        const isSelf = targetUserId === req.user._id.toString();
+        const isAdmin = group.admins.includes(req.user._id);
+
+        if (!isSelf && !isAdmin) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
+        group.members = group.members.filter(m => m.toString() !== targetUserId);
+        group.admins = group.admins.filter(a => a.toString() !== targetUserId);
+
+        if (group.members.length === 0) {
+            await Group.findOneAndDelete({ groupId: req.params.id });
+            return res.json({ message: 'Group deleted as it has no members' });
+        }
+
+        // If the only admin leaves, appoint a new one
+        if (group.admins.length === 0 && group.members.length > 0) {
+            group.admins.push(group.members[0]);
+        }
+
+        await group.save();
+        res.json({ message: 'Member removed', group });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed' });
     }
 });
 
