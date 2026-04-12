@@ -142,11 +142,8 @@ router.post('/join', async (req, res) => {
                     broadcastPushNotification(tokens, {
                         title: '🟢 Meeting Started',
                         body: `${room.hostName} started "${room.title}" — Join now!`,
-                        data: { roomId: room.roomId, type: 'meeting' }
                     });
                 }
-            } else {
-                });
             } else {
                 return res.status(403).json({ 
                     error: 'LOBBY_WAITING',
