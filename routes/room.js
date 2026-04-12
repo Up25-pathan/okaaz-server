@@ -73,8 +73,11 @@ router.get('/scheduled', protect, async (req, res) => {
     try {
         const meetings = await Room.find({
             status: { $in: ['scheduled', 'active'] },
-            // Only show meetings with a scheduledTime (excludes instant meetings)
             scheduledTime: { $exists: true, $ne: null },
+            $or: [
+                { status: 'active' },
+                { scheduledTime: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
+            ]
         }).sort({ scheduledTime: 1 });
 
         res.json(meetings);
@@ -115,14 +118,7 @@ router.post('/join', async (req, res) => {
         let room = await Room.findOne({ roomId });
 
         if (!room) {
-            room = new Room({ 
-                roomId,
-                title: roomId,
-                hostId: userId || userName,
-                hostName: userName,
-                status: 'active' 
-            });
-            await room.save();
+            return res.status(404).json({ error: 'Meeting room not found or not registered.' });
         }
 
         // Logic for scheduled meetings
@@ -150,8 +146,11 @@ router.post('/join', async (req, res) => {
                     });
                 }
             } else {
+                });
+            } else {
                 return res.status(403).json({ 
-                    error: 'Meeting has not started yet. Please wait for the host to join.' 
+                    error: 'LOBBY_WAITING',
+                    message: 'Meeting has not started yet. Please wait for the host to join.' 
                 });
             }
         }
@@ -174,6 +173,24 @@ router.post('/join', async (req, res) => {
     } catch (error) {
         console.error('Error joining room:', error);
         res.status(500).json({ error: 'Failed to join room' });
+    }
+});
+
+// Create an instant meeting record
+router.post('/instant', protect, async (req, res) => {
+    const { roomId, title } = req.body;
+    try {
+        const room = new Room({
+            roomId,
+            title: title || 'Instant Meeting',
+            hostId: req.user._id.toString(),
+            hostName: req.user.username,
+            status: 'active'
+        });
+        await room.save();
+        res.json(room);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to create instant meeting' });
     }
 });
 

@@ -60,6 +60,11 @@ setupSocket(io);
 setIO(io);
 app.set('io', io); // Make IO accessible in routes
 
+// Health Check / Ping Route for Render
+app.get('/api/ping', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date() });
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());

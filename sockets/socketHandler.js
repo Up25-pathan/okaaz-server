@@ -1,10 +1,13 @@
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import Group from '../models/Group.js';
+import Room from '../models/Room.js';
 import { sendPushNotification, broadcastPushNotification } from '../utils/notificationService.js';
 
 const onlineUsers = new Map(); // Socket.id -> { userId, username, lastSeen }
 const userSockets = new Map(); // userId -> Set of socket.ids
+const meetingTimeouts = new Map(); // roomId -> Timeout object
+const activeMeetingParticipants = new Map(); // roomId -> Set of userIds
 
 export const setupSocket = (io) => {
     io.on('connection', (socket) => {
@@ -32,6 +35,45 @@ export const setupSocket = (io) => {
         socket.on('join_room', (roomId) => {
             socket.join(roomId);
             console.log(`User ${socket.id} joined room: ${roomId}`);
+        });
+
+        socket.on('join_call_room', async ({ roomId, userId }) => {
+            socket.join(roomId);
+            if (!activeMeetingParticipants.has(roomId)) {
+                activeMeetingParticipants.set(roomId, new Set());
+            }
+            activeMeetingParticipants.get(roomId).add(userId);
+
+            // If host reconnects, cancel the termination timer
+            const room = await Room.findOne({ roomId });
+            if (room && room.hostId === userId) {
+                if (meetingTimeouts.has(roomId)) {
+                    console.log(`Host reconnected to ${roomId}. Cancelling timeout.`);
+                    clearTimeout(meetingTimeouts.get(roomId));
+                    meetingTimeouts.delete(roomId);
+                }
+            }
+        });
+
+        socket.on('leave_call_room', async ({ roomId, userId }) => {
+            socket.leave(roomId);
+            if (activeMeetingParticipants.has(roomId)) {
+                activeMeetingParticipants.get(roomId).delete(userId);
+            }
+
+            // If host leaves, start 3-minute grace period
+            const room = await Room.findOne({ roomId });
+            if (room && room.hostId === userId && room.status !== 'ended') {
+                console.log(`Host ${userId} left room ${roomId}. Starting 3min grace period.`);
+                const timeout = setTimeout(async () => {
+                    room.status = 'ended';
+                    await room.save();
+                    io.to(roomId).emit('meeting_ended', { reason: 'Host has left the meeting.' });
+                    meetingTimeouts.delete(roomId);
+                    console.log(`Meeting ${roomId} ended due to host host absence.`);
+                }, 3 * 60 * 1000); // 3 minutes
+                meetingTimeouts.set(roomId, timeout);
+            }
         });
 
         socket.on('leave_room', (roomId) => {
