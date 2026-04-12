@@ -46,7 +46,14 @@ initializeFirebase();
  * @param {object} payload - Notification data { title, body, data }
  */
 export const sendPushNotification = async (token, { title, body, data = {} }) => {
-    if (!messaging || !token) return;
+    if (!messaging) {
+        console.warn('✘ FCM: Cannot send notification - Firebase Admin not initialized.');
+        return;
+    }
+    if (!token) {
+        console.warn('✘ FCM: Cannot send notification - No recipient token provided.');
+        return;
+    }
 
     const message = {
         notification: { title, body },
@@ -56,9 +63,9 @@ export const sendPushNotification = async (token, { title, body, data = {} }) =>
 
     try {
         const response = await messaging.send(message);
-        console.log('FCM Success:', response);
+        console.log(`✓ FCM Success: Sent to ${token.substring(0, 10)}... (Response: ${response})`);
     } catch (error) {
-        console.error('FCM Error:', error.message);
+        console.error('✘ FCM Error:', error.message);
     }
 };
 
