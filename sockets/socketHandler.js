@@ -111,7 +111,9 @@ export const setupSocket = (io) => {
                     
                     if (recipientId) {
                         const recipient = await User.findById(recipientId).select('fcmToken');
-                        if (recipient?.fcmToken) {
+                        const isOnline = userSockets.has(recipientId);
+
+                        if (recipient?.fcmToken && !isOnline) {
                             sendPushNotification(recipient.fcmToken, {
                                 title: newMessage.sender.username,
                                 body: newMessage.type === 'text' ? newMessage.text : 'Sent an attachment',
@@ -120,7 +122,7 @@ export const setupSocket = (io) => {
                         }
 
                         // Check for socket delivery
-                        if (userSockets.has(recipientId)) {
+                        if (isOnline) {
                             newMessage.status = 'delivered';
                             newMessage.deliveredTo.push({ user: recipientId, time: new Date() });
                             await newMessage.save();
@@ -132,16 +134,20 @@ export const setupSocket = (io) => {
                     }
                 } else {
                     // Group Chat Push
-                    const group = await Group.findOne({ groupId: messageData.channel }).select('members');
+                    const group = await Group.findOne({ groupId: messageData.channel }).select('members name');
                     if (group) {
                         const otherMembers = await User.find({ 
                             _id: { $in: group.members, $ne: messageData.sender } 
                         }).select('fcmToken');
                         
-                        const tokens = otherMembers.map(m => m.fcmToken).filter(t => t);
+                        // Filter out empty tokens and tokens of users who are currently online
+                        const tokens = otherMembers
+                            .filter(m => !userSockets.has(m._id.toString()) && m.fcmToken)
+                            .map(m => m.fcmToken);
+
                         if (tokens.length > 0) {
                             broadcastPushNotification(tokens, {
-                                title: `Group: ${messageData.channel}`, // Placeholder, usually group name
+                                title: group.name,
                                 body: `${newMessage.sender.username}: ${newMessage.type === 'text' ? newMessage.text : 'Attachment'}`,
                                 data: { channelId: messageData.channel, type: 'group' }
                             });

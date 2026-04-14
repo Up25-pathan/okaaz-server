@@ -140,6 +140,42 @@ router.post('/messages/:id/read', protect, async (req, res) => {
     }
 });
 
+// Mark all messages as read in a channel (Bulk)
+router.post('/messages/read-all', protect, async (req, res) => {
+    try {
+        const { channel } = req.body;
+        if (!channel) return res.status(400).json({ error: 'Channel is required' });
+
+        const userId = req.user._id;
+
+        if (channel.startsWith('dm_')) {
+            // DMs: Update where sender is NOT the current user and status is NOT read
+            await Message.updateMany(
+                { channel, sender: { $ne: userId }, status: { $ne: 'read' } },
+                { $set: { status: 'read' } }
+            );
+        } else {
+            // Groups: push the user to readBy array for messages they haven't read
+            await Message.updateMany(
+                { channel, 'readBy.user': { $ne: userId } },
+                { $push: { readBy: { user: userId, time: new Date() } } }
+            );
+        }
+
+        // Broadcast to notify peer
+        if (req.app.get('io')) {
+            req.app.get('io').to(channel).emit('channel_messages_read', {
+                userId: userId,
+                channel: channel
+            });
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to mark all as read' });
+    }
+});
+
 // Fetch active conversations (DMs and Groups)
 router.get('/conversations', protect, async (req, res) => {
     try {
