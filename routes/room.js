@@ -1,7 +1,7 @@
 import express from 'express';
 import { AccessToken } from 'livekit-server-sdk';
 import Room from '../models/Room.js';
-import { protect } from './auth.js';
+import { protect } from '../utils/authMiddleware.js';
 import dotenv from 'dotenv';
 import User from '../models/User.js';
 import { broadcastPushNotification } from '../utils/notificationService.js';

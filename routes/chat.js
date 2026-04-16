@@ -1,5 +1,5 @@
 import express from 'express';
-import { protect } from './auth.js';
+import { protect } from '../utils/authMiddleware.js';
 import Message from '../models/Message.js';
 import Group from '../models/Group.js';
 import mongoose from 'mongoose';
