@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { protect } from '../middleware/authMiddleware.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -8,23 +9,7 @@ dotenv.config();
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key_change_this';
 
-// Auth Middleware
-export const protect = async (req, res, next) => {
-    try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) return res.status(401).json({ error: 'No token provided' });
-
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.userId).select('-password');
-        
-        if (!user) return res.status(401).json({ error: 'User not authorized' });
-        
-        req.user = user;
-        next();
-    } catch (error) {
-        res.status(401).json({ error: 'Invalid token' });
-    }
-};
+// Auth Middleware (Removed; using central middleware)
 
 // Register
 router.post('/register', async (req, res) => {

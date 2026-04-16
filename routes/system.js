@@ -9,10 +9,10 @@ router.get('/version', async (req, res) => {
     try {
         let version = await AppVersion.findOne().sort({ updatedAt: -1 });
         if (!version) {
-            // Seed a default if none exists
+            // Seed the first official update
             version = await AppVersion.create({
-                latestVersion: '1.0.0',
-                downloadUrl: '',
+                latestVersion: '1.0.1',
+                downloadUrl: 'https://github.com/Up25-pathan/okaaz-server/releases/download/v1.0.1/app-release.apk',
                 isCritical: false
             });
         }
