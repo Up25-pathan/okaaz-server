@@ -209,19 +209,33 @@ router.get('/conversations', protect, async (req, res) => {
             }}
         ]);
 
-        // 2. Get Groups the user is a member of
+        const dmsWithUnread = await Promise.all(dms.map(async (dm) => {
+            const unreadCount = await Message.countDocuments({
+                channel: dm.channel,
+                sender: { $ne: req.user._id },
+                status: { $ne: 'read' }
+            });
+            return { ...dm, unreadCount };
+        }));
+
         const userGroups = await Group.find({ members: req.user._id });
         const groupConversations = await Promise.all(userGroups.map(async (g) => {
             const latestMessage = await Message.findOne({ channel: g.groupId }).sort({ createdAt: -1 }).populate('sender', 'username');
+            const unreadCount = await Message.countDocuments({
+                channel: g.groupId,
+                'readBy.user': { $ne: req.user._id },
+                sender: { $ne: req.user._id } // user's own messages shouldn't be counted as unread mathematically (though handled by frontend often)
+            });
             return {
                 channel: g.groupId,
                 latestMessage: latestMessage || { text: 'No messages yet', createdAt: g.createdAt },
                 groupInfo: g,
-                type: 'group'
+                type: 'group',
+                unreadCount
             };
         }));
 
-        const all = [...dms, ...groupConversations].sort((a, b) => 
+        const all = [...dmsWithUnread, ...groupConversations].sort((a, b) => 
             new Date(b.latestMessage.createdAt) - new Date(a.latestMessage.createdAt)
         );
 

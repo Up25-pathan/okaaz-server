@@ -102,7 +102,12 @@ export const setupSocket = (io) => {
                     { path: 'replyTo', populate: { path: 'sender', select: 'username' } }
                 ]);
 
-                io.to(messageData.channel).emit('receive_message', newMessage);
+                const msgObj = newMessage.toObject();
+                // Ensure front-end parses _id to id if expected, or rely on normal logic.
+                if (messageData.clientId) {
+                    msgObj.clientId = messageData.clientId;
+                }
+                io.to(messageData.channel).emit('receive_message', msgObj);
 
                 // ── Send Push Notifications ──
                 if (messageData.channel.startsWith('dm_')) {
