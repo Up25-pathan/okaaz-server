@@ -5,6 +5,7 @@ import { protect } from './auth.js';
 import dotenv from 'dotenv';
 import User from '../models/User.js';
 import { broadcastPushNotification } from '../utils/notificationService.js';
+import { generateRoomId } from '../utils/roomUtils.js';
 dotenv.config();
 
 const router = express.Router();
@@ -24,15 +25,11 @@ const createToken = async (roomName, participantName, metadata = '') => {
 
 // Schedule a meeting (visible to ALL OKAAZ members)
 router.post('/schedule', protect, async (req, res) => {
-    const { roomId, title, description, hostId, scheduledTime } = req.body;
-
-    if (!roomId || !hostId || !scheduledTime) {
-        return res.status(400).json({ error: 'roomId, hostId, and scheduledTime are required' });
-    }
-
+    const { title, description, hostId, scheduledTime } = req.body;
     try {
+        const generatedRoomId = await generateRoomId();
         const room = new Room({
-            roomId,
+            roomId: generatedRoomId,
             title: title || 'Meeting',
             description: description || '',
             hostId,
@@ -175,10 +172,11 @@ router.post('/join', async (req, res) => {
 
 // Create an instant meeting record
 router.post('/instant', protect, async (req, res) => {
-    const { roomId, title } = req.body;
+    const { title } = req.body;
     try {
+        const generatedRoomId = await generateRoomId();
         const room = new Room({
-            roomId,
+            roomId: generatedRoomId,
             title: title || 'Instant Meeting',
             hostId: req.user._id.toString(),
             hostName: req.user.username,
