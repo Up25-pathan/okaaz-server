@@ -1,5 +1,5 @@
 import express from 'express';
-import { protect, admin } from '../middleware/authMiddleware.js';
+import { protect, admin } from '../utils/authMiddleware.js';
 import User from '../models/User.js';
 import Message from '../models/Message.js';
 import Room from '../models/Room.js';

@@ -1,7 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import { protect } from '../middleware/authMiddleware.js';
+import { protect } from '../utils/authMiddleware.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
