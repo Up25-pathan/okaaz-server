@@ -18,6 +18,7 @@ import roomRoutes, { setIO } from './routes/room.js';
 import authRoutes, { protect } from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import chatRoutes from './routes/chat.js';
+import systemRoutes from './routes/system.js';
 import Group from './models/Group.js';
 
 dotenv.config();
@@ -75,6 +76,7 @@ app.use('/api/room', roomRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/system', systemRoutes);
 
 // File Upload Route
 app.post('/api/chat/upload', protect, upload.single('file'), (req, res) => {
