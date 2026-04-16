@@ -26,6 +26,9 @@ export const setupSocket = (io) => {
                     userSockets.set(userId, new Set());
                 }
                 userSockets.get(userId).add(socket.id);
+                
+                // Join their own private room for direct signaling (notifications/calls)
+                socket.join(userId);
 
                 io.emit('presence_update', { userId: userId, status: 'online' });
                 console.log(`User ${userData.username} is online`);
@@ -202,6 +205,67 @@ export const setupSocket = (io) => {
             } catch (e) {
                 console.error('Delete error:', e);
             }
+        });
+
+        // ── Private Call Signaling ──
+
+        socket.on('private_call_invite', async (data) => {
+            const { callerId, callerName, recipientId, type } = data; // type: 'audio' or 'video'
+            console.log(`Call invite from ${callerName} (${callerId}) to ${recipientId}`);
+
+            const recipientSockets = userSockets.get(recipientId);
+            const isOnline = recipientSockets && recipientSockets.size > 0;
+
+            // Generate a unique room ID for the private call if not provided
+            const callRoomId = data.callRoomId || `call_${Date.now()}_${callerId}_${recipientId}`;
+
+            if (isOnline) {
+                // Send immediate socket signal if recipient is online
+                io.to(recipientId).emit('incoming_call', {
+                    callerId,
+                    callerName,
+                    callRoomId,
+                    type,
+                    callerAvatar: data.callerAvatar
+                });
+            }
+
+            // ALWAYS send FCM for 1:1 calls to ensure background wake-up (VoIP style)
+            const recipient = await User.findById(recipientId).select('fcmToken');
+            if (recipient?.fcmToken) {
+                // Note: For VoIP, data-only messages are better as they allow the app to 
+                // decide how to show the notification (CallKit)
+                sendPushNotification(recipient.fcmToken, {
+                    title: 'Incoming Call',
+                    body: `${callerName} is calling you...`,
+                    data: {
+                        type: 'voip_call',
+                        callerId,
+                        callerName,
+                        callRoomId,
+                        callType: type,
+                        callerAvatar: data.callerAvatar || ''
+                    }
+                });
+            }
+        });
+
+        socket.on('private_call_response', (data) => {
+            const { callerId, recipientId, response, callRoomId } = data; // response: 'accepted', 'rejected', 'busy'
+            console.log(`Call response from ${recipientId} to ${callerId}: ${response}`);
+            
+            // Forward the response to the caller
+            io.to(callerId).emit('call_response_received', {
+                recipientId,
+                response,
+                callRoomId
+            });
+        });
+
+        socket.on('private_call_terminate', (data) => {
+            const { otherPartyId, callRoomId } = data;
+            console.log(`Call terminated in room ${callRoomId}`);
+            io.to(otherPartyId).emit('call_terminated', { callRoomId });
         });
 
         socket.on('hand_raise', (data) => {

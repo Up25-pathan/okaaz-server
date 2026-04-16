@@ -205,4 +205,18 @@ router.post('/end', protect, async (req, res) => {
     }
 });
 
+// Private 1:1 Call Token (WhatsApp Style)
+router.post('/token/private', protect, async (req, res) => {
+    const { callRoomId, participantName, avatarUrl } = req.body;
+    if (!callRoomId) return res.status(400).json({ error: 'callRoomId is required' });
+
+    try {
+        const token = await createToken(callRoomId, participantName, avatarUrl || '');
+        const livekitUrl = process.env.LIVEKIT_URL || 'ws://localhost:7880';
+        res.json({ token, url: livekitUrl });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to generate call token' });
+    }
+});
+
 export default router;
