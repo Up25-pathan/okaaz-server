@@ -166,7 +166,7 @@ router.post('/join', async (req, res) => {
         const token = await createToken(roomId, userName, avatarUrl || '');
         const livekitUrl = process.env.LIVEKIT_URL || 'ws://localhost:7880';
         console.log(`Generated token for ${userName} in room ${roomId}`);
-        res.json({ token, url: livekitUrl });
+        res.json({ token, url: livekitUrl, hostName: room.hostName });
     } catch (error) {
         console.error('Error joining room:', error);
         res.status(500).json({ error: 'Failed to join room' });
