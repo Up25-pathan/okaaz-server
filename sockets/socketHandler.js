@@ -231,13 +231,12 @@ export const setupSocket = (io) => {
             }
 
             // ALWAYS send FCM for 1:1 calls to ensure background wake-up (VoIP style)
-            const recipient = await User.findById(recipientId).select('fcmToken');
             if (recipient?.fcmToken) {
-                // Note: For VoIP, data-only messages are better as they allow the app to 
-                // decide how to show the notification (CallKit)
+                // IMPORTANT: Send data-only message (null title/body) for VoIP 
+                // to let CallKit handle the UI and prevent duplicate system notifications.
                 sendPushNotification(recipient.fcmToken, {
-                    title: 'Incoming Call',
-                    body: `${callerName} is calling you...`,
+                    title: null,
+                    body: null,
                     data: {
                         type: 'voip_call',
                         callerId,
@@ -248,6 +247,7 @@ export const setupSocket = (io) => {
                     }
                 });
             }
+
         });
 
         socket.on('private_call_response', (data) => {

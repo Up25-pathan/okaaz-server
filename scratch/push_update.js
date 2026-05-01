@@ -6,8 +6,8 @@ const pushUpdate = async () => {
     await connectDB();
     
     const versionData = {
-        latestVersion: '1.0.1',
-        downloadUrl: 'https://github.com/Up25-pathan/okaaz-server/releases/download/v1.0.1/app-release.apk',
+        latestVersion: '1.0.2',
+        downloadUrl: 'https://github.com/Up25-pathan/okaaz-server/releases/download/v1.0.2/app-release.apk',
         isCritical: false
     };
 

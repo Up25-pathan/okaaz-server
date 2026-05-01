@@ -56,10 +56,14 @@ export const sendPushNotification = async (token, { title, body, data = {} }) =>
     }
 
     const message = {
-        notification: { title, body },
         data: data,
         token: token,
     };
+
+    if (title || body) {
+        message.notification = { title, body };
+    }
+
 
     try {
         const response = await messaging.send(message);

@@ -25,7 +25,7 @@ const createToken = async (roomName, participantName, metadata = '') => {
 
 // Schedule a meeting (visible to ALL OKAAZ members)
 router.post('/schedule', protect, async (req, res) => {
-    const { title, description, hostId, scheduledTime } = req.body;
+    const { title, description, hostId, scheduledTime, region } = req.body;
     try {
         const generatedRoomId = await generateRoomId();
         const room = new Room({
@@ -35,6 +35,7 @@ router.post('/schedule', protect, async (req, res) => {
             hostId,
             hostName: req.user.username,
             scheduledTime: new Date(scheduledTime),
+            region: region || '',
             status: 'scheduled'
         });
         await room.save();
@@ -43,7 +44,7 @@ router.post('/schedule', protect, async (req, res) => {
         if (ioInstance) {
             ioInstance.emit('meeting_scheduled', {
                 roomId: room.roomId, title: room.title, description: room.description,
-                hostName: req.user.username, scheduledTime: room.scheduledTime,
+                hostName: req.user.username, scheduledTime: room.scheduledTime, region: room.region
             });
         }
 
@@ -51,9 +52,10 @@ router.post('/schedule', protect, async (req, res) => {
         const allUsers = await User.find({}).select('fcmToken');
         const tokens = allUsers.map(u => u.fcmToken).filter(t => t);
         if (tokens.length > 0) {
+            const bodyText = room.region ? `${req.user.username} scheduled "${room.title}" in ${room.region}` : `${req.user.username} scheduled "${room.title}"`;
             broadcastPushNotification(tokens, {
                 title: '📅 New Meeting Scheduled',
-                body: `${req.user.username} scheduled "${room.title}"`,
+                body: bodyText,
                 data: { roomId: room.roomId, type: 'meeting' }
             });
         }
