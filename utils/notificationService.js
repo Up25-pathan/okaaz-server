@@ -58,6 +58,8 @@ export const sendPushNotification = async (token, { title, body, data = {} }) =>
     const message = {
         data: data,
         token: token,
+        android: { priority: 'high' },
+        apns: { payload: { aps: { 'content-available': 1 } }, headers: { 'apns-priority': '10' } }
     };
 
     if (title || body) {
@@ -89,6 +91,8 @@ export const broadcastPushNotification = async (tokens, { title, body, data = {}
         notification: { title, body },
         data: data,
         tokens: validTokens,
+        android: { priority: 'high' },
+        apns: { payload: { aps: { 'content-available': 1 } }, headers: { 'apns-priority': '10' } }
     };
 
     try {

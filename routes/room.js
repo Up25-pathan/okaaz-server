@@ -221,4 +221,15 @@ router.post('/token/private', protect, async (req, res) => {
     }
 });
 
+// Respond to a private call (used for CallKit when socket might be disconnected)
+router.post('/call-response', protect, async (req, res) => {
+    const { callerId, recipientId, response, callRoomId } = req.body;
+    if (ioInstance) {
+        ioInstance.to(callerId).emit('call_response_received', {
+            recipientId, response, callRoomId
+        });
+    }
+    res.json({ success: true });
+});
+
 export default router;

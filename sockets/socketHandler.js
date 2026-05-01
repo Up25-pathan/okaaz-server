@@ -243,7 +243,8 @@ export const setupSocket = (io) => {
                         callerName,
                         callRoomId,
                         callType: type,
-                        callerAvatar: data.callerAvatar || ''
+                        callerAvatar: data.callerAvatar || '',
+                        recipientId: recipientId
                     }
                 });
             }
