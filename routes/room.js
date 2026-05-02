@@ -222,7 +222,7 @@ router.post('/token/private', protect, async (req, res) => {
 });
 
 // Respond to a private call (used for CallKit when socket might be disconnected)
-router.post('/call-response', protect, async (req, res) => {
+router.post('/call-response', async (req, res) => {
     const { callerId, recipientId, response, callRoomId } = req.body;
     if (ioInstance) {
         ioInstance.to(callerId).emit('call_response_received', {
