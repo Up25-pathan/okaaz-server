@@ -230,23 +230,30 @@ export const setupSocket = (io) => {
                 });
             }
 
-            // ALWAYS send FCM for 1:1 calls to ensure background wake-up (VoIP style)
-            if (recipient?.fcmToken) {
-                // IMPORTANT: Send data-only message (null title/body) for VoIP 
-                // to let CallKit handle the UI and prevent duplicate system notifications.
-                sendPushNotification(recipient.fcmToken, {
-                    title: null,
-                    body: null,
-                    data: {
-                        type: 'voip_call',
-                        callerId,
-                        callerName,
-                        callRoomId,
-                        callType: type,
-                        callerAvatar: data.callerAvatar || '',
-                        recipientId: recipientId
-                    }
-                });
+            // ALWAYS fetch recipient from DB to get FCM token for background wake-up
+            try {
+                const recipient = await User.findById(recipientId).select('fcmToken');
+                if (recipient?.fcmToken) {
+                    // Send data-only message (null title/body) for VoIP
+                    // to let CallKit handle the UI and prevent duplicate system notifications.
+                    sendPushNotification(recipient.fcmToken, {
+                        title: null,
+                        body: null,
+                        data: {
+                            type: 'voip_call',
+                            callerId,
+                            callerName,
+                            callRoomId,
+                            callType: type,
+                            callerAvatar: data.callerAvatar || '',
+                            recipientId: recipientId
+                        }
+                    });
+                } else {
+                    console.log(`Recipient ${recipientId} has no FCM token — skipping push.`);
+                }
+            } catch (err) {
+                console.error('Failed to fetch recipient for FCM push:', err.message);
             }
 
         });
