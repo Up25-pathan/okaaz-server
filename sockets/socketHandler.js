@@ -210,17 +210,16 @@ export const setupSocket = (io) => {
         // ── Private Call Signaling ──
 
         socket.on('private_call_invite', async (data) => {
-            const { callerId, callerName, recipientId, type } = data; // type: 'audio' or 'video'
-            console.log(`Call invite from ${callerName} (${callerId}) to ${recipientId}`);
+            const { callerId, callerName, recipientId, type } = data;
+            console.log(`[CALL] Invite from ${callerName} (${callerId}) → ${recipientId} [type: ${type}]`);
 
             const recipientSockets = userSockets.get(recipientId);
             const isOnline = recipientSockets && recipientSockets.size > 0;
-
-            // Generate a unique room ID for the private call if not provided
             const callRoomId = data.callRoomId || `call_${Date.now()}_${callerId}_${recipientId}`;
 
+            console.log(`[CALL] Recipient online: ${isOnline} | userSockets size: ${recipientSockets?.size ?? 0}`);
+
             if (isOnline) {
-                // Send immediate socket signal if recipient is online
                 io.to(recipientId).emit('incoming_call', {
                     callerId,
                     callerName,
@@ -228,14 +227,16 @@ export const setupSocket = (io) => {
                     type,
                     callerAvatar: data.callerAvatar
                 });
+                console.log(`[CALL] ✓ Socket signal sent to room: ${recipientId}`);
+            } else {
+                console.log(`[CALL] ⚠ Recipient not in userSockets — relying on FCM push only`);
             }
 
-            // ALWAYS fetch recipient from DB to get FCM token for background wake-up
+            // ALWAYS fetch recipient from DB for FCM push (background wake-up)
             try {
                 const recipient = await User.findById(recipientId).select('fcmToken');
                 if (recipient?.fcmToken) {
-                    // Send data-only message (null title/body) for VoIP
-                    // to let CallKit handle the UI and prevent duplicate system notifications.
+                    console.log(`[CALL] Sending FCM push to ${recipientId}...`);
                     sendPushNotification(recipient.fcmToken, {
                         title: null,
                         body: null,
@@ -250,12 +251,11 @@ export const setupSocket = (io) => {
                         }
                     });
                 } else {
-                    console.log(`Recipient ${recipientId} has no FCM token — skipping push.`);
+                    console.log(`[CALL] ✗ Recipient has no FCM token — cannot send push`);
                 }
             } catch (err) {
-                console.error('Failed to fetch recipient for FCM push:', err.message);
+                console.error('[CALL] Failed to fetch recipient for FCM push:', err.message);
             }
-
         });
 
         socket.on('private_call_response', (data) => {
