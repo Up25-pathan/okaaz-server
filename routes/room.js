@@ -315,4 +315,15 @@ router.post('/call-response', async (req, res) => {
     res.json({ success: true });
 });
 
+// Get meeting details by roomId
+router.get('/:roomId', protect, async (req, res) => {
+    try {
+        const room = await Room.findOne({ roomId: req.params.roomId });
+        if (!room) return res.status(404).json({ error: 'Meeting not found' });
+        res.json(room);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch meeting details' });
+    }
+});
+
 export default router;
