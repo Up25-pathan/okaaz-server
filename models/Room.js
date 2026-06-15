@@ -29,6 +29,10 @@ const roomSchema = new mongoose.Schema({
         type: String,
         default: '',
     },
+    regionSpecific: {
+        type: Boolean,
+        default: false,
+    },
     status: {
         type: String,
         enum: ['scheduled', 'active', 'ended'],

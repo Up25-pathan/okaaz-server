@@ -207,73 +207,80 @@ export const setupSocket = (io) => {
             }
         });
 
-        // ── Private Call Signaling ──
+        // ── Private Call Signaling (Overhauled) ──
 
-        socket.on('private_call_invite', async (data) => {
-            const { callerId, callerName, recipientId, type } = data;
-            console.log(`[CALL] Invite from ${callerName} (${callerId}) → ${recipientId} [type: ${type}]`);
+        socket.on('call:invite', async (data) => {
+            const { callerId, callerName, recipientId, type, callRoomId } = data;
+            console.log(`[CALL] Invite from ${callerName} (${callerId}) → ${recipientId} [type: ${type}, room: ${callRoomId}]`);
 
             const recipientSockets = userSockets.get(recipientId);
             const isOnline = recipientSockets && recipientSockets.size > 0;
-            const callRoomId = data.callRoomId || `call_${Date.now()}_${callerId}_${recipientId}`;
-
-            console.log(`[CALL] Recipient online: ${isOnline} | userSockets size: ${recipientSockets?.size ?? 0}`);
 
             if (isOnline) {
-                io.to(recipientId).emit('incoming_call', {
+                io.to(recipientId).emit('call:incoming', {
                     callerId,
                     callerName,
+                    callerAvatar: data.callerAvatar || '',
                     callRoomId,
                     type,
-                    callerAvatar: data.callerAvatar
+                    recipientId,
                 });
-                console.log(`[CALL] ✓ Socket signal sent to room: ${recipientId}`);
+                console.log(`[CALL] ✓ call:incoming sent to ${recipientId}`);
             } else {
-                console.log(`[CALL] ⚠ Recipient not in userSockets — relying on FCM push only`);
+                console.log(`[CALL] ⚠ Recipient offline — relying on FCM push only`);
             }
 
-            // ALWAYS fetch recipient from DB for FCM push (background wake-up)
+            // FCM push for background wake-up
             try {
                 const recipient = await User.findById(recipientId).select('fcmToken');
                 if (recipient?.fcmToken) {
-                    console.log(`[CALL] Sending FCM push to ${recipientId}...`);
                     sendPushNotification(recipient.fcmToken, {
-                        title: null,
-                        body: null,
+                        title: null, body: null,
                         data: {
                             type: 'voip_call',
-                            callerId,
-                            callerName,
+                            callerId, callerName,
                             callRoomId,
                             callType: type,
                             callerAvatar: data.callerAvatar || '',
-                            recipientId: recipientId
+                            recipientId
                         }
                     });
-                } else {
-                    console.log(`[CALL] ✗ Recipient has no FCM token — cannot send push`);
                 }
             } catch (err) {
-                console.error('[CALL] Failed to fetch recipient for FCM push:', err.message);
+                console.error('[CALL] FCM push error:', err.message);
             }
         });
 
-        socket.on('private_call_response', (data) => {
-            const { callerId, recipientId, response, callRoomId } = data; // response: 'accepted', 'rejected', 'busy'
-            console.log(`Call response from ${recipientId} to ${callerId}: ${response}`);
-            
-            // Forward the response to the caller
-            io.to(callerId).emit('call_response_received', {
-                recipientId,
-                response,
-                callRoomId
-            });
+        socket.on('call:accept', (data) => {
+            const { callRoomId, callerId, recipientId } = data;
+            console.log(`[CALL] Accept: ${recipientId} accepted call ${callRoomId} from ${callerId}`);
+            io.to(callerId).emit('call:accepted', { callRoomId, recipientId });
         });
 
-        socket.on('private_call_terminate', (data) => {
-            const { otherPartyId, callRoomId } = data;
-            console.log(`Call terminated in room ${callRoomId}`);
-            io.to(otherPartyId).emit('call_terminated', { callRoomId });
+        socket.on('call:reject', (data) => {
+            const { callRoomId, callerId, recipientId } = data;
+            console.log(`[CALL] Reject: ${recipientId} rejected call ${callRoomId} from ${callerId}`);
+            io.to(callerId).emit('call:rejected', { callRoomId, recipientId });
+        });
+
+        socket.on('call:busy', (data) => {
+            const { callRoomId, callerId, recipientId } = data;
+            console.log(`[CALL] Busy: ${recipientId} is busy for call ${callRoomId}`);
+            io.to(callerId).emit('call:busy', { callRoomId, recipientId });
+        });
+
+        socket.on('call:end', (data) => {
+            const { callRoomId, otherPartyId } = data;
+            console.log(`[CALL] End: call ${callRoomId} ended`);
+            if (otherPartyId) {
+                io.to(otherPartyId).emit('call:ended', { callRoomId });
+            }
+        });
+
+        socket.on('call:missed', (data) => {
+            const { callRoomId, callerId } = data;
+            console.log(`[CALL] Missed: call ${callRoomId} went unanswered`);
+            io.to(callerId).emit('call:missed', { callRoomId });
         });
 
         socket.on('hand_raise', (data) => {

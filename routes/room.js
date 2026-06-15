@@ -23,9 +23,9 @@ const createToken = async (roomName, participantName, metadata = '') => {
     return await at.toJwt();
 };
 
-// Schedule a meeting (visible to ALL OKAAZ members)
+// Schedule a meeting
 router.post('/schedule', protect, async (req, res) => {
-    const { title, description, hostId, scheduledTime, region } = req.body;
+    const { title, description, hostId, scheduledTime, region, regionSpecific } = req.body;
     try {
         const generatedRoomId = await generateRoomId();
         const room = new Room({
@@ -36,23 +36,41 @@ router.post('/schedule', protect, async (req, res) => {
             hostName: req.user.username,
             scheduledTime: new Date(scheduledTime),
             region: region || '',
+            regionSpecific: regionSpecific === true,
             status: 'scheduled'
         });
         await room.save();
 
-        // Broadcast notification to ALL connected members via Socket.IO
+        const meetingData = {
+            roomId: room.roomId, title: room.title, description: room.description,
+            hostName: req.user.username, scheduledTime: room.scheduledTime,
+            region: room.region, regionSpecific: room.regionSpecific,
+        };
+
+        // ── Socket.IO Notification ──
         if (ioInstance) {
-            ioInstance.emit('meeting_scheduled', {
-                roomId: room.roomId, title: room.title, description: room.description,
-                hostName: req.user.username, scheduledTime: room.scheduledTime, region: room.region
-            });
+            if (room.regionSpecific && room.region) {
+                const regionUsers = await User.find({ region: room.region }).select('_id');
+                regionUsers.forEach(u => {
+                    ioInstance.to(u._id.toString()).emit('meeting_scheduled', meetingData);
+                });
+            } else {
+                ioInstance.emit('meeting_scheduled', meetingData);
+            }
         }
 
         // ── FCM Broadcast ──
-        const allUsers = await User.find({}).select('fcmToken');
-        const tokens = allUsers.map(u => u.fcmToken).filter(t => t);
+        let targetUsers;
+        if (room.regionSpecific && room.region) {
+            targetUsers = await User.find({ region: room.region }).select('fcmToken');
+        } else {
+            targetUsers = await User.find({}).select('fcmToken');
+        }
+        const tokens = targetUsers.map(u => u.fcmToken).filter(t => t);
         if (tokens.length > 0) {
-            const bodyText = room.region ? `${req.user.username} scheduled "${room.title}" in ${room.region}` : `${req.user.username} scheduled "${room.title}"`;
+            const bodyText = room.region
+                ? `${req.user.username} scheduled "${room.title}" in ${room.region}`
+                : `${req.user.username} scheduled "${room.title}"`;
             broadcastPushNotification(tokens, {
                 title: '📅 New Meeting Scheduled',
                 body: bodyText,
@@ -67,15 +85,26 @@ router.post('/schedule', protect, async (req, res) => {
     }
 });
 
-// Get ALL upcoming scheduled meetings (visible to every OKAAZ member)
+// Get upcoming scheduled meetings (filtered by region)
 router.get('/scheduled', protect, async (req, res) => {
     try {
         const meetings = await Room.find({
             status: { $in: ['scheduled', 'active'] },
             scheduledTime: { $exists: true, $ne: null },
-            $or: [
-                { status: 'active' },
-                { scheduledTime: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
+            $and: [
+                {
+                    $or: [
+                        { status: 'active' },
+                        { scheduledTime: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
+                    ]
+                },
+                {
+                    $or: [
+                        { regionSpecific: { $ne: true } },
+                        { region: req.user.region || '' },
+                        { hostId: req.user._id.toString() },
+                    ]
+                }
             ]
         }).sort({ scheduledTime: 1 });
 
@@ -125,18 +154,31 @@ router.post('/join', async (req, res) => {
             if (userId === room.hostId || userName === room.hostId) {
                 room.status = 'active';
                 await room.save();
-                // Notify everyone the meeting started
+                // Notify members the meeting started
                 if (ioInstance) {
-                    ioInstance.emit('meeting_started', {
+                    const startData = {
                         roomId: room.roomId,
                         title: room.title,
                         hostName: room.hostName,
-                    });
+                    };
+                    if (room.regionSpecific && room.region) {
+                        const regionUsers = await User.find({ region: room.region }).select('_id');
+                        regionUsers.forEach(u => {
+                            ioInstance.to(u._id.toString()).emit('meeting_started', startData);
+                        });
+                    } else {
+                        ioInstance.emit('meeting_started', startData);
+                    }
                 }
 
                 // ── FCM Broadcast ──
-                const allUsers = await User.find({}).select('fcmToken');
-                const tokens = allUsers.map(u => u.fcmToken).filter(t => t);
+                let targetUsers;
+                if (room.regionSpecific && room.region) {
+                    targetUsers = await User.find({ region: room.region }).select('fcmToken');
+                } else {
+                    targetUsers = await User.find({}).select('fcmToken');
+                }
+                const tokens = targetUsers.map(u => u.fcmToken).filter(t => t);
                 if (tokens.length > 0) {
                     broadcastPushNotification(tokens, {
                         title: '🟢 Meeting Started',
@@ -224,10 +266,16 @@ router.post('/token/private', protect, async (req, res) => {
 // Respond to a private call (used for CallKit when socket might be disconnected)
 router.post('/call-response', async (req, res) => {
     const { callerId, recipientId, response, callRoomId } = req.body;
-    if (ioInstance) {
-        ioInstance.to(callerId).emit('call_response_received', {
-            recipientId, response, callRoomId
-        });
+    if (!ioInstance) return res.json({ success: false });
+
+    const eventMap = {
+        accepted: 'call:accepted',
+        rejected: 'call:rejected',
+        busy: 'call:busy',
+    };
+    const eventName = eventMap[response];
+    if (eventName) {
+        ioInstance.to(callerId).emit(eventName, { callRoomId, recipientId });
     }
     res.json({ success: true });
 });

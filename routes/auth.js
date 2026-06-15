@@ -14,7 +14,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key_change_this'
 // Register
 router.post('/register', async (req, res) => {
     try {
-        const { username, email, password, inviteCode } = req.body;
+        const { username, email, password, inviteCode, region } = req.body;
 
         // Simple Invite Code Check
         const GROUP_INVITE_CODE = process.env.INVITE_CODE || 'OKAAZ-2024'; 
@@ -33,11 +33,11 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ error: 'Username or email already exists' });
         }
 
-        const user = new User({ username, email, password, role });
+        const user = new User({ username, email, password, role, region: region || '' });
         await user.save();
 
         const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-        res.status(201).json({ token, user: { _id: user._id, username, email, avatarUrl: user.avatarUrl, role: user.role } });
+        res.status(201).json({ token, user: { _id: user._id, username, email, avatarUrl: user.avatarUrl, role: user.role, region: user.region } });
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Server error during registration' });
@@ -55,7 +55,7 @@ router.post('/login', async (req, res) => {
         }
 
         const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ token, user: { _id: user._id, username: user.username, email, avatarUrl: user.avatarUrl, role: user.role } });
+        res.json({ token, user: { _id: user._id, username: user.username, email, avatarUrl: user.avatarUrl, role: user.role, region: user.region } });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Server error during login' });
@@ -70,11 +70,11 @@ router.get('/me', protect, async (req, res) => {
 // Update Profile
 router.put('/profile', protect, async (req, res) => {
     try {
-        const { username, bio, avatarUrl } = req.body;
+        const { username, bio, avatarUrl, region } = req.body;
 
         const user = await User.findByIdAndUpdate(
             req.user._id,
-            { username, bio, avatarUrl },
+            { username, bio, avatarUrl, region: region || '' },
             { new: true }
         ).select('-password');
 
@@ -100,7 +100,7 @@ router.post('/fcm-token', protect, async (req, res) => {
 // Get all members
 router.get('/members', async (req, res) => {
     try {
-        const users = await User.find().select('username avatarUrl bio createdAt');
+        const users = await User.find().select('username avatarUrl bio createdAt region');
         res.json(users);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch members' });
@@ -110,7 +110,7 @@ router.get('/members', async (req, res) => {
 // Get specific user profile
 router.get('/profile/:id', async (req, res) => {
     try {
-        const user = await User.findById(req.params.id).select('username avatarUrl bio createdAt');
+        const user = await User.findById(req.params.id).select('username avatarUrl bio createdAt region');
         if (!user) return res.status(404).json({ error: 'User not found' });
         res.json(user);
     } catch (error) {

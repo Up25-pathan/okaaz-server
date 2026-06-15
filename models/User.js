@@ -37,6 +37,10 @@ const userSchema = new mongoose.Schema({
         enum: ['user', 'admin'],
         default: 'user',
     },
+    region: {
+        type: String,
+        default: '',
+    },
     fcmToken: {
         type: String,
         default: '',
