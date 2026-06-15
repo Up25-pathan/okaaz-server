@@ -25,8 +25,9 @@ const createToken = async (roomName, participantName, metadata = '') => {
 
 // Schedule a meeting
 router.post('/schedule', protect, async (req, res) => {
-    const { title, description, hostId, scheduledTime, region, regionSpecific } = req.body;
+    const { title, description, hostId, scheduledTime, region, regionSpecific, ladiesOnly } = req.body;
     try {
+        const isLadiesOnly = ladiesOnly === true && req.user.gender === 'female';
         const generatedRoomId = await generateRoomId();
         const room = new Room({
             roomId: generatedRoomId,
@@ -35,8 +36,9 @@ router.post('/schedule', protect, async (req, res) => {
             hostId,
             hostName: req.user.username,
             scheduledTime: new Date(scheduledTime),
-            region: region || '',
-            regionSpecific: regionSpecific === true,
+            region: isLadiesOnly ? '' : (region || ''),
+            regionSpecific: isLadiesOnly ? false : (regionSpecific === true),
+            ladiesOnly: isLadiesOnly,
             status: 'scheduled'
         });
         await room.save();
@@ -44,16 +46,22 @@ router.post('/schedule', protect, async (req, res) => {
         const meetingData = {
             roomId: room.roomId, title: room.title, description: room.description,
             hostName: req.user.username, scheduledTime: room.scheduledTime,
-            region: room.region, regionSpecific: room.regionSpecific,
+            region: room.region, regionSpecific: room.regionSpecific, ladiesOnly: room.ladiesOnly,
         };
 
         // ── Socket.IO Notification ──
         if (ioInstance) {
-            if (room.regionSpecific && room.region) {
+            let targetUserIds;
+            if (room.ladiesOnly) {
+                const femaleUsers = await User.find({ gender: 'female' }).select('_id');
+                targetUserIds = femaleUsers.map(u => u._id.toString());
+            } else if (room.regionSpecific && room.region) {
                 const regionUsers = await User.find({ region: room.region }).select('_id');
-                regionUsers.forEach(u => {
-                    ioInstance.to(u._id.toString()).emit('meeting_scheduled', meetingData);
-                });
+                targetUserIds = regionUsers.map(u => u._id.toString());
+            }
+
+            if (targetUserIds) {
+                targetUserIds.forEach(uid => ioInstance.to(uid).emit('meeting_scheduled', meetingData));
             } else {
                 ioInstance.emit('meeting_scheduled', meetingData);
             }
@@ -61,16 +69,23 @@ router.post('/schedule', protect, async (req, res) => {
 
         // ── FCM Broadcast ──
         let targetUsers;
-        if (room.regionSpecific && room.region) {
+        if (room.ladiesOnly) {
+            targetUsers = await User.find({ gender: 'female' }).select('fcmToken');
+        } else if (room.regionSpecific && room.region) {
             targetUsers = await User.find({ region: room.region }).select('fcmToken');
         } else {
             targetUsers = await User.find({}).select('fcmToken');
         }
         const tokens = targetUsers.map(u => u.fcmToken).filter(t => t);
         if (tokens.length > 0) {
-            const bodyText = room.region
-                ? `${req.user.username} scheduled "${room.title}" in ${room.region}`
-                : `${req.user.username} scheduled "${room.title}"`;
+            let bodyText;
+            if (room.ladiesOnly) {
+                bodyText = `👩 ${req.user.username} scheduled "${room.title}" (Ladies only)`;
+            } else if (room.region) {
+                bodyText = `${req.user.username} scheduled "${room.title}" in ${room.region}`;
+            } else {
+                bodyText = `${req.user.username} scheduled "${room.title}"`;
+            }
             broadcastPushNotification(tokens, {
                 title: '📅 New Meeting Scheduled',
                 body: bodyText,
@@ -85,27 +100,39 @@ router.post('/schedule', protect, async (req, res) => {
     }
 });
 
-// Get upcoming scheduled meetings (filtered by region)
+// Get upcoming scheduled meetings (filtered by region & gender)
 router.get('/scheduled', protect, async (req, res) => {
     try {
+        const filterConditions = [
+            {
+                $or: [
+                    { status: 'active' },
+                    { scheduledTime: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
+                ]
+            },
+            {
+                $or: [
+                    { regionSpecific: { $ne: true } },
+                    { region: req.user.region || '' },
+                    { hostId: req.user._id.toString() },
+                ]
+            },
+        ];
+
+        // Hide ladiesOnly meetings from non-female users (host always sees own)
+        if (req.user.gender !== 'female') {
+            filterConditions.push({
+                $or: [
+                    { ladiesOnly: { $ne: true } },
+                    { hostId: req.user._id.toString() },
+                ]
+            });
+        }
+
         const meetings = await Room.find({
             status: { $in: ['scheduled', 'active'] },
             scheduledTime: { $exists: true, $ne: null },
-            $and: [
-                {
-                    $or: [
-                        { status: 'active' },
-                        { scheduledTime: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
-                    ]
-                },
-                {
-                    $or: [
-                        { regionSpecific: { $ne: true } },
-                        { region: req.user.region || '' },
-                        { hostId: req.user._id.toString() },
-                    ]
-                }
-            ]
+            $and: filterConditions,
         }).sort({ scheduledTime: 1 });
 
         res.json(meetings);
@@ -160,12 +187,18 @@ router.post('/join', async (req, res) => {
                         roomId: room.roomId,
                         title: room.title,
                         hostName: room.hostName,
+                        ladiesOnly: room.ladiesOnly,
                     };
-                    if (room.regionSpecific && room.region) {
+                    let targetIds;
+                    if (room.ladiesOnly) {
+                        const femaleUsers = await User.find({ gender: 'female' }).select('_id');
+                        targetIds = femaleUsers.map(u => u._id.toString());
+                    } else if (room.regionSpecific && room.region) {
                         const regionUsers = await User.find({ region: room.region }).select('_id');
-                        regionUsers.forEach(u => {
-                            ioInstance.to(u._id.toString()).emit('meeting_started', startData);
-                        });
+                        targetIds = regionUsers.map(u => u._id.toString());
+                    }
+                    if (targetIds) {
+                        targetIds.forEach(uid => ioInstance.to(uid).emit('meeting_started', startData));
                     } else {
                         ioInstance.emit('meeting_started', startData);
                     }
@@ -173,7 +206,9 @@ router.post('/join', async (req, res) => {
 
                 // ── FCM Broadcast ──
                 let targetUsers;
-                if (room.regionSpecific && room.region) {
+                if (room.ladiesOnly) {
+                    targetUsers = await User.find({ gender: 'female' }).select('fcmToken');
+                } else if (room.regionSpecific && room.region) {
                     targetUsers = await User.find({ region: room.region }).select('fcmToken');
                 } else {
                     targetUsers = await User.find({}).select('fcmToken');

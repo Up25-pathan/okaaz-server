@@ -33,6 +33,10 @@ const roomSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    ladiesOnly: {
+        type: Boolean,
+        default: false,
+    },
     status: {
         type: String,
         enum: ['scheduled', 'active', 'ended'],
