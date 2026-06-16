@@ -20,6 +20,7 @@ import { protect } from './utils/authMiddleware.js';
 import adminRoutes from './routes/admin.js';
 import chatRoutes from './routes/chat.js';
 import systemRoutes from './routes/system.js';
+import blockRoutes from './routes/block.js';
 import Group from './models/Group.js';
 
 dotenv.config();
@@ -77,6 +78,7 @@ app.use('/api/room', roomRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/block', blockRoutes);
 app.use('/api/system', systemRoutes);
 
 // File Upload Route

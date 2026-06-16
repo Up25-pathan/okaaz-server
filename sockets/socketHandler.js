@@ -2,6 +2,7 @@ import Message from '../models/Message.js';
 import User from '../models/User.js';
 import Group from '../models/Group.js';
 import Room from '../models/Room.js';
+import BlockedUser from '../models/BlockedUser.js';
 import { sendPushNotification, broadcastPushNotification } from '../utils/notificationService.js';
 
 const onlineUsers = new Map(); // Socket.id -> { userId, username, lastSeen }
@@ -94,6 +95,24 @@ export const setupSocket = (io) => {
 
         socket.on('send_message', async (messageData) => {
             try {
+                // Check block status for DM
+                if (messageData.channel && messageData.channel.startsWith('dm_')) {
+                    const participants = messageData.channel.replace('dm_', '').split('_');
+                    const recipientId = participants.find(id => id !== messageData.sender?.toString());
+                    if (recipientId) {
+                        const blocked = await BlockedUser.findOne({
+                            $or: [
+                                { blocker: messageData.sender, blocked: recipientId },
+                                { blocker: recipientId, blocked: messageData.sender },
+                            ]
+                        });
+                        if (blocked) {
+                            socket.emit('message_blocked', { channel: messageData.channel });
+                            return;
+                        }
+                    }
+                }
+
                 const newMessage = new Message({
                     ...messageData,
                     status: 'sent'
@@ -204,6 +223,59 @@ export const setupSocket = (io) => {
                 }
             } catch (e) {
                 console.error('Delete error:', e);
+            }
+        });
+
+        // Revoke message for everyone (replace with "deleted" placeholder)
+        socket.on('revoke_message', async (data) => {
+            try {
+                const message = await Message.findById(data.messageId);
+                if (message && message.sender.toString() === data.userId) {
+                    message.text = 'This message was deleted';
+                    message.mediaUrl = '';
+                    message.fileName = '';
+                    message.fileSize = 0;
+                    message.type = 'system';
+                    await message.save();
+                    io.to(data.channel).emit('message_revoked', {
+                        messageId: data.messageId,
+                        channel: data.channel,
+                        text: 'This message was deleted',
+                    });
+                }
+            } catch (e) {
+                console.error('Revoke error:', e);
+            }
+        });
+
+        // Forward message
+        socket.on('forward_message', async (data) => {
+            try {
+                const { originalMessageId, targetChannel, userId } = data;
+                const original = await Message.findById(originalMessageId);
+                if (!original) return;
+
+                const newMessage = new Message({
+                    sender: userId,
+                    text: original.text,
+                    type: original.type,
+                    channel: targetChannel,
+                    mediaUrl: original.mediaUrl,
+                    fileName: original.fileName,
+                    fileSize: original.fileSize,
+                    isForwarded: true,
+                    status: 'sent',
+                });
+                await newMessage.save();
+                await newMessage.populate([
+                    { path: 'sender', select: 'username email avatarUrl role' },
+                ]);
+
+                const msgObj = newMessage.toObject();
+                msgObj.clientId = data.clientId;
+                io.to(targetChannel).emit('receive_message', msgObj);
+            } catch (e) {
+                console.error('Forward error:', e);
             }
         });
 
